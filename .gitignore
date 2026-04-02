@@ -17,4 +17,5 @@ artifacts/
 
 # Xcode
 ios/ProjectNotebook/ProjectNotebook.xcodeproj/xcuserdata/
+*.xcuserstate
 DerivedData/

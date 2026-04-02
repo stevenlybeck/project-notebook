@@ -1,6 +1,16 @@
 import UIKit
 import UniformTypeIdentifiers
 
+/// Convenience wrapper that writes to the shared UploadLog file.
+/// Used throughout the extension for debugging; logs are viewable in the container app's Logs screen.
+private func log(_ msg: String) {
+    UploadLog.shared.log(msg)
+}
+
+/// The main view controller for the Share Extension. Presented by iOS when the user shares
+/// media via the share sheet and selects "Project Notebook". It fetches the list of active
+/// projects from the hub server, lets the user pick one, then hands off the file to a
+/// background URLSession for upload and dismisses immediately.
 class ShareViewController: UIViewController {
 
     private let hubURLKey = "hubURL"
@@ -14,16 +24,13 @@ class ShareViewController: UIViewController {
     private let statusLabel = UILabel()
     private let activityIndicator = UIActivityIndicatorView(style: .medium)
 
+
     // MARK: - Lifecycle
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         title = "Project Notebook"
-
-        navigationItem.leftBarButtonItem = UIBarButtonItem(
-            barButtonSystemItem: .cancel, target: self, action: #selector(cancelTapped)
-        )
 
         collectAttachments()
         setupUI()
@@ -32,6 +39,9 @@ class ShareViewController: UIViewController {
 
     // MARK: - UI
 
+    /// Builds the extension's interface: a navigation bar with cancel button, a table view
+    /// for project selection, and a centered status label with activity indicator for
+    /// loading/error states.
     private func setupUI() {
         let nav = UINavigationBar()
         let navItem = UINavigationItem(title: "Send to Project")
@@ -82,22 +92,36 @@ class ShareViewController: UIViewController {
 
     // MARK: - Collect shared items
 
+    /// Extracts NSItemProvider references from the share sheet's input items. These providers
+    /// are not the actual files yet — they are handles that must be loaded asynchronously
+    /// via loadFileRepresentation() later in loadFirst().
     private func collectAttachments() {
-        guard let items = extensionContext?.inputItems as? [NSExtensionItem] else { return }
+        guard let items = extensionContext?.inputItems as? [NSExtensionItem] else {
+            log("ERROR: No input items")
+            return
+        }
         for item in items {
             for provider in item.attachments ?? [] {
+                log("Attachment: \(provider.registeredTypeIdentifiers.joined(separator: ", "))")
                 attachments.append(provider)
             }
         }
+        log("Collected \(self.attachments.count) attachment(s)")
     }
 
     // MARK: - Hub communication
 
+    /// Reads the hub URL from the App Group's shared UserDefaults. This value is set by the
+    /// user in the container app's settings screen and shared with the extension via the
+    /// "group.projectnotebook" App Group.
     private var hubBaseURL: String {
         let defaults = UserDefaults(suiteName: suiteName)
         return defaults?.string(forKey: hubURLKey) ?? ""
     }
 
+    /// Fetches the list of active projects from the hub server (GET /api/projects) and
+    /// populates the table view. Projects are registered with the hub by Claude Code sessions
+    /// on the Mac, each with a name, path, and TTL.
     private func fetchProjects() {
         guard !hubBaseURL.isEmpty else {
             showStatus("Set hub URL in the Project Notebook app first")
@@ -138,113 +162,139 @@ class ShareViewController: UIViewController {
         }.resume()
     }
 
+    /// Called when the user taps a project. Iterates over all shared attachments, loads each
+    /// one as a file via loadFirst(), then hands each file to startBackgroundUpload(). Dismisses
+    /// the extension as soon as all uploads are kicked off — does NOT wait for uploads to complete,
+    /// since the OS-managed background session handles that independently.
     private func uploadFiles(to project: String) {
-        showStatus("Uploading \(attachments.count) file(s)...")
+        showStatus("Preparing...")
+        log("uploadFiles called for project: \(project)")
 
         let group = DispatchGroup()
         var errors: [String] = []
 
-        for provider in attachments {
+        for (i, provider) in attachments.enumerated() {
             group.enter()
+            log("Processing attachment \(i): types=\(provider.registeredTypeIdentifiers)")
 
-            // Try video first, then image, then any data
             let types: [UTType] = [.movie, .image, .audio, .data]
             loadFirst(provider: provider, types: types) { [weak self] url, suggestedName in
                 guard let self = self, let url = url else {
+                    log("ERROR: Failed to load attachment \(i)")
                     errors.append("Failed to load attachment")
                     group.leave()
                     return
                 }
 
                 let filename = suggestedName ?? url.lastPathComponent
-                guard let fileData = try? Data(contentsOf: url) else {
-                    errors.append("Failed to read file data")
-                    group.leave()
-                    return
+                let finalFilename: String
+                if URL(fileURLWithPath: filename).pathExtension.isEmpty {
+                    finalFilename = filename + "." + url.pathExtension
+                } else {
+                    finalFilename = filename
                 }
 
-                self.postToHub(project: project, filename: filename, data: fileData) { success, msg in
-                    if !success { errors.append(msg ?? "Upload failed") }
-                    group.leave()
-                }
+                log("Loaded attachment \(i): \(finalFilename) at \(url.path)")
+
+                self.startUpload(
+                    project: project, filename: finalFilename, fileURL: url
+                )
+                group.leave()
             }
         }
 
         group.notify(queue: .main) { [weak self] in
             if errors.isEmpty {
+                log("All uploads started, dismissing extension")
                 self?.done()
             } else {
+                log("ERROR: \(errors.joined(separator: ", "))")
                 self?.showStatus("Errors: \(errors.joined(separator: ", "))")
             }
         }
     }
 
+    /// Tries to load a file representation from an NSItemProvider by iterating through UTTypes
+    /// in priority order (movie, image, audio, generic data). When iOS provides the file via
+    /// the callback, it's a temporary URL that will be deleted — so we immediately copy it to
+    /// the App Group shared container where the background URLSession can access it even after
+    /// the extension process dies.
     private func loadFirst(provider: NSItemProvider, types: [UTType], completion: @escaping (URL?, String?) -> Void) {
         func tryNext(_ index: Int) {
             guard index < types.count else {
+                log("ERROR: No matching type found for provider")
                 completion(nil, nil)
                 return
             }
             let uti = types[index]
             if provider.hasItemConformingToTypeIdentifier(uti.identifier) {
+                log("Loading file representation for type: \(uti.identifier)")
                 provider.loadFileRepresentation(forTypeIdentifier: uti.identifier) { url, error in
                     if let url = url {
-                        // Copy to temp because the provided URL is deleted after this callback
-                        let tmp = FileManager.default.temporaryDirectory
-                            .appendingPathComponent(url.lastPathComponent)
-                        try? FileManager.default.removeItem(at: tmp)
-                        try? FileManager.default.copyItem(at: url, to: tmp)
-                        completion(tmp, provider.suggestedName)
+                        log("Got file: \(url.lastPathComponent)")
+                        let container = FileManager.default.containerURL(
+                            forSecurityApplicationGroupIdentifier: "group.projectnotebook"
+                        ) ?? FileManager.default.temporaryDirectory
+                        let tmp = container.appendingPathComponent(UUID().uuidString + "_" + url.lastPathComponent)
+                        do {
+                            try? FileManager.default.removeItem(at: tmp)
+                            try FileManager.default.copyItem(at: url, to: tmp)
+                            log("Copied to shared container: \(tmp.lastPathComponent)")
+                            completion(tmp, provider.suggestedName)
+                        } catch {
+                            log("ERROR: Failed to copy file: \(error.localizedDescription)")
+                            completion(nil, nil)
+                        }
                     } else {
+                        log("WARN: loadFileRepresentation failed for \(uti.identifier): \(error?.localizedDescription ?? "nil")")
                         tryNext(index + 1)
                     }
                 }
             } else {
+                log("Provider doesn't conform to \(uti.identifier), trying next")
                 tryNext(index + 1)
             }
         }
         tryNext(0)
     }
 
-    private func postToHub(project: String, filename: String, data: Data,
-                           completion: @escaping (Bool, String?) -> Void) {
-        guard let url = URL(string: "\(hubBaseURL)/api/ingest") else {
-            completion(false, "Invalid URL")
-            return
-        }
+    /// Creates a background URLSession with BackgroundUploadDelegate attached, starts the upload,
+    /// and saves the session ID so the container app can claim it after the extension dies.
+    /// The extension receives progress callbacks while alive; the app takes over after.
+    private func startUpload(project: String, filename: String, fileURL: URL) {
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? nil
+        let recordID = UploadLog.shared.add(
+            filename: filename, project: project,
+            fileSize: fileSize, localFilePath: fileURL.path
+        )
 
-        let boundary = UUID().uuidString
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 120
+        guard var urlComponents = URLComponents(string: "\(hubBaseURL)/api/ingest") else { return }
+        urlComponents.queryItems = [
+            URLQueryItem(name: "project", value: project),
+            URLQueryItem(name: "filename", value: filename),
+            URLQueryItem(name: "upload_id", value: recordID.uuidString),
+        ]
+        guard let ingestURL = urlComponents.url else { return }
 
-        var body = Data()
+        let sessionID = "group.projectnotebook.upload.\(recordID.uuidString)"
+        let config = URLSessionConfiguration.background(withIdentifier: sessionID)
+        config.sharedContainerIdentifier = suiteName
+        config.sessionSendsLaunchEvents = true
+        config.isDiscretionary = false
+        UploadLog.shared.addSession(id: sessionID)
 
-        // Project field
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"project\"\r\n\r\n".data(using: .utf8)!)
-        body.append("\(project)\r\n".data(using: .utf8)!)
+        let session = URLSession(configuration: config, delegate: nil, delegateQueue: nil)
 
-        // File field
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
-        body.append(data)
-        body.append("\r\n".data(using: .utf8)!)
+        var request = URLRequest(url: ingestURL)
+        request.httpMethod = "PUT"
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
 
-        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        let task = session.uploadTask(with: request, fromFile: fileURL)
+        task.taskDescription = recordID.uuidString
+        UploadLog.shared.updateStatus(id: recordID, status: .uploading)
+        task.resume()
 
-        request.httpBody = body
-
-        URLSession.shared.dataTask(with: request) { _, response, error in
-            if let error = error {
-                completion(false, error.localizedDescription)
-                return
-            }
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            completion(status == 200, status == 200 ? nil : "HTTP \(status)")
-        }.resume()
+        log("Started upload: \(filename) (\(fileSize ?? 0) bytes) session=\(sessionID) record=\(recordID)")
     }
 
     // MARK: - Helpers
@@ -269,6 +319,9 @@ class ShareViewController: UIViewController {
 
 // MARK: - UITableView
 
+/// Table view data source/delegate for the project picker. Each row shows a registered
+/// project name. Tapping a row triggers uploadFiles(to:) which starts the background
+/// upload and dismisses the extension.
 extension ShareViewController: UITableViewDelegate, UITableViewDataSource {
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         projects.count

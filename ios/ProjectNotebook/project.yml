@@ -3,9 +3,26 @@ options:
   bundleIdPrefix: com.projectnotebook
   deploymentTarget:
     iOS: "16.0"
+  createIntermediateGroups: true
 
 settings:
   DEVELOPMENT_TEAM: LSHKSFHL5R
+
+schemes:
+  ProjectNotebook:
+    build:
+      targets:
+        ProjectNotebook: all
+    run:
+      config: Debug
+  ShareExtension:
+    build:
+      targets:
+        ShareExtension: all
+        ProjectNotebook: all
+    run:
+      config: Debug
+      askForAppToLaunch: true
 
 targets:
   ProjectNotebook:
@@ -13,6 +30,7 @@ targets:
     platform: iOS
     sources:
       - ProjectNotebook
+      - Shared
     info:
       path: ProjectNotebook/Info.plist
       properties:
@@ -36,6 +54,7 @@ targets:
     platform: iOS
     sources:
       - ShareExtension
+      - Shared
     info:
       path: ShareExtension/Info.plist
       properties:
