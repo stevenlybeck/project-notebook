@@ -1,0 +1,59 @@
+name: ProjectNotebook
+options:
+  bundleIdPrefix: com.projectnotebook
+  deploymentTarget:
+    iOS: "16.0"
+
+settings:
+  DEVELOPMENT_TEAM: LSHKSFHL5R
+
+targets:
+  ProjectNotebook:
+    type: application
+    platform: iOS
+    sources:
+      - ProjectNotebook
+    info:
+      path: ProjectNotebook/Info.plist
+      properties:
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: "Project Notebook needs local network access to connect to the hub on your Mac."
+    settings:
+      INFOPLIST_FILE: ProjectNotebook/Info.plist
+      CODE_SIGN_ENTITLEMENTS: ProjectNotebook/ProjectNotebook.entitlements
+    entitlements:
+      path: ProjectNotebook/ProjectNotebook.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.projectnotebook
+    dependencies:
+      - target: ShareExtension
+        embed: true
+
+  ShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - ShareExtension
+    info:
+      path: ShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Project Notebook
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule: TRUEPREDICATE
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: "Project Notebook needs local network access to send files to your Mac."
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.projectnotebook.ProjectNotebook.ShareExtension
+      INFOPLIST_FILE: ShareExtension/Info.plist
+      CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtension.entitlements
+    entitlements:
+      path: ShareExtension/ShareExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.projectnotebook
