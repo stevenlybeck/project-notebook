@@ -12,6 +12,7 @@ API:
   GET  /                → Web UI
 """
 
+import json
 import os
 import subprocess
 import time
@@ -19,9 +20,38 @@ from pathlib import Path
 
 from aiohttp import web
 
+# Persistent state directory (override with PROJECT_NOTEBOOK_HOME).
+STATE_DIR = Path(os.environ.get("PROJECT_NOTEBOOK_HOME", Path.home() / ".project-notebook"))
+STATE_FILE = STATE_DIR / "state.json"
+
 # State
 projects: dict = {}  # project_name -> {"path": str, "expires": float}
+# In-memory only: an in-flight upload can't survive a hub restart anyway.
 active_uploads: dict = {}  # upload_id -> {"filename": str, "project": str, "received": int, "total": int or None, "status": str}
+
+
+def load_state():
+    """Load persisted registrations on startup, dropping any already expired."""
+    if not STATE_FILE.exists():
+        return
+    try:
+        data = json.loads(STATE_FILE.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[hub] Could not read {STATE_FILE} ({e}); starting empty")
+        return
+    now = time.time()
+    for name, info in data.get("projects", {}).items():
+        if info.get("expires", 0) > now:
+            projects[name] = info
+    print(f"[hub] Loaded {len(projects)} project(s) from {STATE_FILE}")
+
+
+def save_state():
+    """Persist registrations atomically (temp file + rename)."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
+    tmp.write_text(json.dumps({"projects": projects}, indent=2))
+    tmp.replace(STATE_FILE)
 
 
 def get_artifacts(project_path: str) -> list:
@@ -55,6 +85,8 @@ def prune_expired():
     expired = [name for name, info in projects.items() if info["expires"] < now]
     for name in expired:
         del projects[name]
+    if expired:
+        save_state()
 
 
 # --- HTTP handlers ---
@@ -83,6 +115,7 @@ async def handle_register(request):
     if not name or not path:
         return web.Response(status=400, text="Missing project or path")
     projects[name] = {"path": path, "expires": time.time() + ttl}
+    save_state()
     print(f"[hub] Registered project: {name} (path={path}, ttl={ttl}s)")
     return web.json_response({"status": "registered", "project": name})
 
@@ -92,6 +125,7 @@ async def handle_unregister(request):
     name = body.get("project", "")
     if name in projects:
         del projects[name]
+        save_state()
     return web.json_response({"status": "unregistered", "project": name})
 
 
@@ -323,4 +357,5 @@ app.router.add_post("/api/ingest", handle_ingest)
 app.router.add_put("/api/ingest", handle_ingest)
 
 if __name__ == "__main__":
+    load_state()
     web.run_app(app, port=9999)
