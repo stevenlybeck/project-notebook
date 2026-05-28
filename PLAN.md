@@ -2,18 +2,22 @@
 
 ## Goal
 
-Make project-notebook installable via pip/uv with a CLI that auto-starts the hub and registers projects. The Claude skill becomes: "install this Python library and use it to claim a project name."
+Make project-notebook installable via pip/uv as a developer tool. The intended install is `uv tool install project-notebook` (or `pipx install project-notebook`); the CLI auto-starts the hub, registers projects, and pairs phones. No native GUI in v1 — a menu-bar icon may ship later as a separate package.
+
+## Distribution shape
+
+This sits in the same convention as Jupyter, Streamlit, and MLflow: a pip-installable Python tool that runs a local HTTP server. The audience is Claude Code users who already have a Python toolchain, so a menu-bar app would be polish, not a prerequisite.
 
 ## Architecture
 
 ```
-pip/uv install project-notebook
+uv tool install project-notebook
                   │
                   ▼
          `notebook register`   ← CLI command
                   │
                   ├── Is hub running on :9999?
-                  │     No → start it in background (daemonize)
+                  │     No → start it in background (LaunchAgent or detached process)
                   │     Yes → use existing
                   │
                   └── POST /api/register {project, path, ttl}
@@ -25,9 +29,13 @@ pip/uv install project-notebook
 ## CLI Commands
 
 - `notebook register [name] [--ttl 7200]` — ensures hub is running, registers project
-- `notebook hub` — explicitly start the hub
-- `notebook status` — show registered projects and active uploads
+- `notebook hub` — explicitly start the hub (foreground)
+- `notebook status` — show registered projects, paired devices, recent uploads
 - `notebook unregister` — remove project
+- `notebook pair` — print a QR (in the terminal) for the iOS app to scan
+- `notebook devices` — list paired devices, revoke tokens
+- `notebook install-skill` — copy the bundled Claude skill into `~/.claude/skills/`
+- `notebook install-agent` — install the LaunchAgent plist for auto-start on login (opt-in)
 
 ## What Needs to Change
 
@@ -42,27 +50,44 @@ project-notebook/
 │   └── project_notebook/
 │       ├── __init__.py
 │       ├── hub.py          # the server (moved here)
-│       └── cli.py          # CLI entry point
+│       ├── cli.py          # CLI entry point
+│       ├── pairing.py      # QR + token mint/verify
+│       └── skill/          # bundled Claude skill (copied on install-skill)
 ├── ios/                    # iOS app (not part of the package)
-└── .claude/
-    └── skills/
-        └── notebook-register/  # skill just calls `notebook register`
 ```
 
 ### 2. Hub lifecycle
 
 - `notebook register` checks if :9999 is already responding
 - If not, spawns `notebook hub` as a background process (detached, writes PID to `~/.project-notebook/hub.pid`)
-- Hub stays alive until explicitly stopped or machine restarts
-- Could also install as a launchd service for auto-start on login
+- `notebook install-agent` is the opt-in path to a launchd plist for auto-start on login — `pip install` does not write LaunchAgents as a side effect
 
-### 3. Claude skill simplifies
+### 3. Claude skill ships with the package
 
-The skill becomes a one-liner that runs `notebook register $0`. The CLI handles everything (hub startup, registration, error handling).
+The skill lives inside the package at `src/project_notebook/skill/`. `notebook install-skill` copies it to `~/.claude/skills/notebook-register/` (or `notebook register` does this on first run). Upgrading the package upgrades the skill. The skill itself is a one-liner that calls `notebook register $0`.
 
-### 4. iOS app unchanged
+### 4. Secure pairing
 
-Already fetches project list from hub at configured URL. No changes needed.
+LAN-only, bearer-token model — no TLS in v1, threat model is "trusted home network" and documented as such.
+
+- `notebook pair` mints a short-lived pairing code + long-lived device token; renders a QR with `{lan_url, pairing_code}` in the terminal (using `qrcode` or `segno`)
+- iOS scans, POSTs the pairing code to `lan_url/api/pair`, receives the device token, stores it in the Keychain
+- Every subsequent iOS request carries the device token as a bearer header; hub rejects unknown tokens
+- mDNS/Bonjour advertises `_notebook._tcp.local` so the LAN URL doesn't need to bake in an IP that changes
+- `notebook devices` lists paired devices and revokes tokens
+
+### 5. iOS app changes
+
+- First-launch flow: scan QR → store device token in Keychain
+- All requests to the hub gain an `Authorization: Bearer <token>` header
+- Discovery via Bonjour, falling back to a manually entered URL
+
+## Deferred (post-v1)
+
+- **Menu-bar app** — separate `project-notebook-menubar` package, or a native `.app`. Decide when v1 is in use and the pain of "is the hub running?" becomes concrete.
+- **HTTPS on LAN** — only worth it if the trusted-LAN threat model stops being adequate.
+- **QuickShare ingestion** — investigate using QuickShare (Google's cross-platform Nearby Share) as an alternate transport. Could provide a zero-config "send to Mac" path that bypasses LAN/IP/token plumbing entirely, and would extend reach beyond iOS to Android and ChromeOS. Open questions: does the macOS QuickShare client expose a programmable hook, or would the hub need to watch a drop folder?
+- **iOS auto-bump build number** — set `VERSIONING_SYSTEM = "apple-generic"` in pbxproj and add a pre-archive script that sets `CURRENT_PROJECT_VERSION` to either a Unix timestamp (`date +%s`) or `git rev-list --count HEAD`. Apple rejects re-uploads with the same `CFBundleVersion` within a marketing version, so this removes the "remember to bump the build number" tax. Defer until manual bumping in the Xcode UI becomes annoying.
 
 ## Artifact Processing
 
