@@ -12,6 +12,7 @@ API:
   GET  /                → Web UI
 """
 
+import asyncio
 import json
 import os
 import subprocess
@@ -23,7 +24,8 @@ from aiohttp import web
 # Persistent state directory (override with PROJECT_NOTEBOOK_HOME).
 STATE_DIR = Path(os.environ.get("PROJECT_NOTEBOOK_HOME", Path.home() / ".project-notebook"))
 STATE_FILE = STATE_DIR / "state.json"
-PORT = int(os.environ.get("PROJECT_NOTEBOOK_PORT", "9999"))
+PORT = int(os.environ.get("PROJECT_NOTEBOOK_PORT", "9999"))          # phone API (LAN)
+WEB_PORT = int(os.environ.get("PROJECT_NOTEBOOK_WEB_PORT", "9877"))  # web UI (loopback)
 
 # State
 projects: dict = {}  # project_name -> {"path": str, "expires": float}
@@ -358,21 +360,68 @@ async def handle_health(request):
     return web.json_response({"service": "project-notebook-hub", "status": "ok"})
 
 
-app = web.Application(client_max_size=1024 * 1024 * 1024)  # 1GB max upload
-app.router.add_get("/", handle_index)
-app.router.add_get("/api/health", handle_health)
-app.router.add_get("/api/projects", handle_projects)
-app.router.add_get("/api/uploads", handle_uploads)
-app.router.add_post("/api/register", handle_register)
-app.router.add_post("/api/unregister", handle_unregister)
-app.router.add_post("/api/ingest", handle_ingest)
-app.router.add_put("/api/ingest", handle_ingest)
+def make_apps():
+    """Build the three plane apps. State is shared via module globals.
+
+    - local: Unix-socket plane for CLI commands (register/status/...).
+    - phone: LAN plane for device ingest (auth added separately).
+    - web:   loopback plane for the read-only web UI.
+    """
+    local = web.Application()
+    local.router.add_get("/api/health", handle_health)
+    local.router.add_get("/api/projects", handle_projects)
+    local.router.add_get("/api/uploads", handle_uploads)
+    local.router.add_post("/api/register", handle_register)
+    local.router.add_post("/api/unregister", handle_unregister)
+
+    phone = web.Application(client_max_size=1024 * 1024 * 1024)  # 1GB max upload
+    phone.router.add_post("/api/ingest", handle_ingest)
+    phone.router.add_put("/api/ingest", handle_ingest)
+
+    web_ui = web.Application()
+    web_ui.router.add_get("/", handle_index)
+    web_ui.router.add_get("/api/projects", handle_projects)
+    web_ui.router.add_get("/api/uploads", handle_uploads)
+
+    return local, phone, web_ui
+
+
+async def _serve():
+    load_state()
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    local, phone, web_ui = make_apps()
+
+    # Local commands: Unix domain socket, owner-only.
+    local_runner = web.AppRunner(local)
+    await local_runner.setup()
+    sock_path = STATE_DIR / "hub.sock"
+    if sock_path.exists():
+        sock_path.unlink()
+    await web.UnixSite(local_runner, str(sock_path)).start()
+    os.chmod(sock_path, 0o600)
+
+    # Phone API: reachable on the LAN.
+    phone_runner = web.AppRunner(phone)
+    await phone_runner.setup()
+    await web.TCPSite(phone_runner, "0.0.0.0", PORT).start()
+
+    # Web UI: loopback only.
+    web_runner = web.AppRunner(web_ui)
+    await web_runner.setup()
+    await web.TCPSite(web_runner, "127.0.0.1", WEB_PORT).start()
+
+    print(f"[hub] local socket: {sock_path}")
+    print(f"[hub] phone API:    http://0.0.0.0:{PORT}")
+    print(f"[hub] web UI:       http://127.0.0.1:{WEB_PORT}")
+    await asyncio.Event().wait()
 
 
 def run():
-    """Load persisted state and start the hub (blocking)."""
-    load_state()
-    web.run_app(app, port=PORT)
+    """Start the hub on all three listeners (blocking)."""
+    try:
+        asyncio.run(_serve())
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":

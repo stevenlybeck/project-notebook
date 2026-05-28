@@ -6,38 +6,41 @@ HTTP API over loopback, so the hub remains the single source of truth.
 """
 
 import argparse
+import asyncio
 import importlib.resources as resources
-import json
 import os
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
-
-def _port() -> int:
-    return int(os.environ.get("PROJECT_NOTEBOOK_PORT", "9999"))
+import aiohttp
 
 
-def _base() -> str:
-    return f"http://127.0.0.1:{_port()}"
+def _state_dir() -> Path:
+    return Path(os.environ.get("PROJECT_NOTEBOOK_HOME", Path.home() / ".project-notebook"))
+
+
+def _sock_path() -> Path:
+    return _state_dir() / "hub.sock"
+
+
+async def _request(method: str, path: str, payload: dict | None = None, timeout: float = 5.0):
+    conn = aiohttp.UnixConnector(path=str(_sock_path()))
+    async with aiohttp.ClientSession(
+        connector=conn, timeout=aiohttp.ClientTimeout(total=timeout)
+    ) as session:
+        async with session.request(method, "http://localhost" + path, json=payload) as r:
+            r.raise_for_status()
+            return await r.json()
 
 
 def _get(path: str, timeout: float = 5.0):
-    with urllib.request.urlopen(_base() + path, timeout=timeout) as r:
-        return json.loads(r.read())
+    return asyncio.run(_request("GET", path, timeout=timeout))
 
 
 def _post(path: str, payload: dict, timeout: float = 5.0):
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        _base() + path, data=data,
-        headers={"Content-Type": "application/json"}, method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read())
+    return asyncio.run(_request("POST", path, payload=payload, timeout=timeout))
 
 
 def _hub_alive() -> bool:
@@ -48,10 +51,10 @@ def _hub_alive() -> bool:
 
 
 def _ensure_hub_running(timeout: float = 10.0):
-    """Reuse a running hub (health probe); otherwise spawn one detached."""
+    """Reuse a running hub (health probe over the socket); otherwise spawn one detached."""
     if _hub_alive():
         return
-    state_dir = Path(os.environ.get("PROJECT_NOTEBOOK_HOME", Path.home() / ".project-notebook"))
+    state_dir = _state_dir()
     state_dir.mkdir(parents=True, exist_ok=True)
     log = open(state_dir / "hub.log", "a")
     subprocess.Popen(
@@ -136,7 +139,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         args.func(args)
-    except urllib.error.HTTPError as e:
-        raise SystemExit(f"Hub returned {e.code}: {e.read().decode(errors='replace')}")
-    except urllib.error.URLError as e:
-        raise SystemExit(f"Could not reach hub at {_base()}: {e.reason}")
+    except aiohttp.ClientResponseError as e:
+        raise SystemExit(f"Hub returned {e.status}: {e.message}")
+    except aiohttp.ClientError as e:
+        raise SystemExit(f"Could not reach hub over {_sock_path()}: {e}")
