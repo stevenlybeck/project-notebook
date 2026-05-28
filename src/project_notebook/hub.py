@@ -15,6 +15,7 @@ API:
 import asyncio
 import json
 import os
+import secrets
 import subprocess
 import time
 from pathlib import Path
@@ -410,6 +411,24 @@ async def handle_devices_revoke(request):
     return web.json_response({"status": "revoked", "device_id": device_id, "name": d["name"]})
 
 
+def _token_valid(token: str) -> bool:
+    return bool(token) and any(
+        secrets.compare_digest(d["token"], token) for d in devices.values()
+    )
+
+
+@web.middleware
+async def require_device_token(request, handler):
+    """Phone plane: every route except pairing needs a valid device token."""
+    if request.path == "/api/pair":
+        return await handler(request)
+    auth = request.headers.get("Authorization", "")
+    token = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+    if not _token_valid(token):
+        return web.Response(status=401, text="Missing or invalid device token")
+    return await handler(request)
+
+
 def make_apps():
     """Build the three plane apps. State is shared via module globals.
 
@@ -427,7 +446,10 @@ def make_apps():
     local.router.add_get("/api/devices", handle_devices)
     local.router.add_post("/api/devices/revoke", handle_devices_revoke)
 
-    phone = web.Application(client_max_size=1024 * 1024 * 1024)  # 1GB max upload
+    phone = web.Application(
+        client_max_size=1024 * 1024 * 1024,  # 1GB max upload
+        middlewares=[require_device_token],
+    )
     phone.router.add_post("/api/ingest", handle_ingest)
     phone.router.add_put("/api/ingest", handle_ingest)
     phone.router.add_post("/api/pair", handle_pair)
