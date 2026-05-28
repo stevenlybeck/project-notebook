@@ -76,6 +76,22 @@ LAN-only, bearer-token model — no TLS in v1, threat model is "trusted home net
 - mDNS/Bonjour advertises `_notebook._tcp.local` so the LAN URL doesn't need to bake in an IP that changes
 - `notebook devices` lists paired devices and revokes tokens
 
+Pairing sits inside a broader three-plane access model (local commands over a Unix socket, phone API over the LAN, web UI on loopback). See [docs/security.md](docs/security.md) for the full model and rationale.
+
+## Workstream C — Secure pairing + plane separation
+
+Task checklist (build after A+B; depends on B's persisted state for device tokens):
+
+- [ ] **Split listeners** — one process, three aiohttp sites: `UnixSite` (`hub.sock`, mode `0600`) for local commands; `TCPSite` `0.0.0.0:9999` for the phone API; `TCPSite` `127.0.0.1` for the web UI. Move each route onto the plane where it belongs.
+- [ ] **Fix path traversal in `ingest`** — destination is currently `artifacts_dir / filename` from client input; use `Path(filename).name` to strip directory components. Live bug today, independent of pairing.
+- [ ] **Device registry** — persist device tokens in `~/.project-notebook/` (extends B), with mint/verify/revoke.
+- [ ] **`pair` flow** — `pairing.py` mints a single-use, ~60–120s pairing code + long-lived device token; `notebook pair` renders the QR; `/api/pair` exchanges code → token.
+- [ ] **Bearer-token middleware** — on the phone-API listener only; reject unknown/revoked tokens.
+- [ ] **Host-header check** — on the web-UI listener, reject non-`localhost` Host to block DNS rebinding.
+- [ ] **CLI over the socket** — `register`/`status`/etc. talk to `hub.sock` via `aiohttp.UnixConnector` (or `httpx` `uds=`).
+- [ ] **mDNS/Bonjour** — advertise `_notebook._tcp.local` for LAN discovery.
+- [ ] **iOS** — see section 5.
+
 ### 5. iOS app changes
 
 - First-launch flow: scan QR → store device token in Keychain
