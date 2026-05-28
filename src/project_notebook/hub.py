@@ -23,6 +23,7 @@ from aiohttp import web
 # Persistent state directory (override with PROJECT_NOTEBOOK_HOME).
 STATE_DIR = Path(os.environ.get("PROJECT_NOTEBOOK_HOME", Path.home() / ".project-notebook"))
 STATE_FILE = STATE_DIR / "state.json"
+PORT = int(os.environ.get("PROJECT_NOTEBOOK_PORT", "9999"))
 
 # State
 projects: dict = {}  # project_name -> {"path": str, "expires": float}
@@ -347,8 +348,14 @@ async def handle_uploads(request):
     return web.json_response({"uploads": active_uploads})
 
 
+async def handle_health(request):
+    """Liveness probe with a recognizable signature for the CLI."""
+    return web.json_response({"service": "project-notebook-hub", "status": "ok"})
+
+
 app = web.Application(client_max_size=1024 * 1024 * 1024)  # 1GB max upload
 app.router.add_get("/", handle_index)
+app.router.add_get("/api/health", handle_health)
 app.router.add_get("/api/projects", handle_projects)
 app.router.add_get("/api/uploads", handle_uploads)
 app.router.add_post("/api/register", handle_register)
@@ -356,6 +363,12 @@ app.router.add_post("/api/unregister", handle_unregister)
 app.router.add_post("/api/ingest", handle_ingest)
 app.router.add_put("/api/ingest", handle_ingest)
 
-if __name__ == "__main__":
+
+def run():
+    """Load persisted state and start the hub (blocking)."""
     load_state()
-    web.run_app(app, port=9999)
+    web.run_app(app, port=PORT)
+
+
+if __name__ == "__main__":
+    run()
