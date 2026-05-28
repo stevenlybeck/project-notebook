@@ -429,6 +429,15 @@ async def require_device_token(request, handler):
     return await handler(request)
 
 
+@web.middleware
+async def require_local_host(request, handler):
+    """Web plane: only accept loopback Host headers, to block DNS rebinding."""
+    allowed = {f"localhost:{WEB_PORT}", f"127.0.0.1:{WEB_PORT}", f"[::1]:{WEB_PORT}"}
+    if request.host not in allowed:
+        return web.Response(status=403, text="Forbidden")
+    return await handler(request)
+
+
 def make_apps():
     """Build the three plane apps. State is shared via module globals.
 
@@ -454,7 +463,7 @@ def make_apps():
     phone.router.add_put("/api/ingest", handle_ingest)
     phone.router.add_post("/api/pair", handle_pair)
 
-    web_ui = web.Application()
+    web_ui = web.Application(middlewares=[require_local_host])
     web_ui.router.add_get("/", handle_index)
     web_ui.router.add_get("/api/projects", handle_projects)
     web_ui.router.add_get("/api/uploads", handle_uploads)
