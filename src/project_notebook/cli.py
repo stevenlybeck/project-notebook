@@ -114,6 +114,31 @@ def cmd_install_claude_code_skill(args):
     print(f"Installed {count} skill file(s) to {dest}")
 
 
+def cmd_pair(args):
+    from . import pairing
+    _ensure_hub_running()
+    resp = _post("/api/pair/new", {})
+    deep_link = f"projectnotebook://pair?url={resp['lan_url']}&code={resp['code']}"
+    print(pairing.render_qr(deep_link))
+    print(f"Scan within {resp['ttl']}s to pair. Hub: {resp['lan_url']}")
+
+
+def cmd_devices(args):
+    _ensure_hub_running()
+    if args.revoke:
+        resp = _post("/api/devices/revoke", {"device_id": args.revoke})
+        print(f"Revoked '{resp['name']}' ({resp['device_id']})")
+        return
+    devs = _get("/api/devices")["devices"]
+    if not devs:
+        print("No paired devices.")
+        return
+    print("Paired devices:")
+    for d in devs:
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(d["paired_at"]))
+        print(f"  {d['id']}  {d['name']}  (paired {when})")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="project-notebook", description="Project Notebook hub + CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -135,6 +160,13 @@ def main(argv=None):
 
     p = sub.add_parser("install-claude-code-skill", help="Install the Claude Code skill into ~/.claude/skills")
     p.set_defaults(func=cmd_install_claude_code_skill)
+
+    p = sub.add_parser("pair", help="Pair a phone by printing a QR code to scan")
+    p.set_defaults(func=cmd_pair)
+
+    p = sub.add_parser("devices", help="List or revoke paired devices")
+    p.add_argument("--revoke", metavar="ID", help="Revoke the device with this id")
+    p.set_defaults(func=cmd_devices)
 
     args = parser.parse_args(argv)
     try:

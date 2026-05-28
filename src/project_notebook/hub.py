@@ -21,6 +21,8 @@ from pathlib import Path
 
 from aiohttp import web
 
+from . import pairing
+
 # Persistent state directory (override with PROJECT_NOTEBOOK_HOME).
 STATE_DIR = Path(os.environ.get("PROJECT_NOTEBOOK_HOME", Path.home() / ".project-notebook"))
 STATE_FILE = STATE_DIR / "state.json"
@@ -29,12 +31,14 @@ WEB_PORT = int(os.environ.get("PROJECT_NOTEBOOK_WEB_PORT", "9877"))  # web UI (l
 
 # State
 projects: dict = {}  # project_name -> {"path": str, "expires": float}
-# In-memory only: an in-flight upload can't survive a hub restart anyway.
-active_uploads: dict = {}  # upload_id -> {"filename": str, "project": str, "received": int, "total": int or None, "status": str}
+devices: dict = {}    # device_id -> {"token": str, "name": str, "paired_at": float}
+# In-memory only (lost on restart, which is fine):
+active_uploads: dict = {}    # upload_id -> {"filename": str, "project": str, "received": int, "total": int or None, "status": str}
+pending_pairings: dict = {}  # code -> {"token": str, "device_id": str, "expires": float}
 
 
 def load_state():
-    """Load persisted registrations on startup, dropping any already expired."""
+    """Load persisted registrations and devices; drop already-expired registrations."""
     if not STATE_FILE.exists():
         return
     try:
@@ -46,14 +50,15 @@ def load_state():
     for name, info in data.get("projects", {}).items():
         if info.get("expires", 0) > now:
             projects[name] = info
-    print(f"[hub] Loaded {len(projects)} project(s) from {STATE_FILE}")
+    devices.update(data.get("devices", {}))
+    print(f"[hub] Loaded {len(projects)} project(s), {len(devices)} device(s) from {STATE_FILE}")
 
 
 def save_state():
-    """Persist registrations atomically (temp file + rename)."""
+    """Persist registrations and devices atomically (temp file + rename)."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
-    tmp.write_text(json.dumps({"projects": projects}, indent=2))
+    tmp.write_text(json.dumps({"projects": projects, "devices": devices}, indent=2))
     tmp.replace(STATE_FILE)
 
 
@@ -360,6 +365,51 @@ async def handle_health(request):
     return web.json_response({"service": "project-notebook-hub", "status": "ok"})
 
 
+async def handle_pair_new(request):
+    """Local plane: mint a single-use pairing code + a pending device token."""
+    code = pairing.new_code()
+    pending_pairings[code] = {
+        "token": pairing.new_token(),
+        "device_id": pairing.new_device_id(),
+        "expires": time.time() + pairing.PAIRING_TTL,
+    }
+    lan_url = f"http://{pairing.lan_ip()}:{PORT}"
+    return web.json_response({"code": code, "lan_url": lan_url, "ttl": pairing.PAIRING_TTL})
+
+
+async def handle_pair(request):
+    """Phone plane: redeem a pairing code for a long-lived device token."""
+    body = await request.json()
+    code = body.get("code", "")
+    name = body.get("device_name") or "device"
+    info = pending_pairings.pop(code, None)  # single-use
+    if not info or info["expires"] < time.time():
+        return web.Response(status=403, text="Invalid or expired pairing code")
+    devices[info["device_id"]] = {"token": info["token"], "name": name, "paired_at": time.time()}
+    save_state()
+    print(f"[hub] Paired device '{name}' ({info['device_id']})")
+    return web.json_response({"token": info["token"], "device_id": info["device_id"]})
+
+
+async def handle_devices(request):
+    """Local plane: list paired devices (tokens are never exposed)."""
+    return web.json_response({"devices": [
+        {"id": did, "name": d["name"], "paired_at": d["paired_at"]}
+        for did, d in devices.items()
+    ]})
+
+
+async def handle_devices_revoke(request):
+    """Local plane: revoke a device by id."""
+    body = await request.json()
+    device_id = body.get("device_id", "")
+    d = devices.pop(device_id, None)
+    if d is None:
+        return web.Response(status=404, text=f"No device '{device_id}'")
+    save_state()
+    return web.json_response({"status": "revoked", "device_id": device_id, "name": d["name"]})
+
+
 def make_apps():
     """Build the three plane apps. State is shared via module globals.
 
@@ -373,10 +423,14 @@ def make_apps():
     local.router.add_get("/api/uploads", handle_uploads)
     local.router.add_post("/api/register", handle_register)
     local.router.add_post("/api/unregister", handle_unregister)
+    local.router.add_post("/api/pair/new", handle_pair_new)
+    local.router.add_get("/api/devices", handle_devices)
+    local.router.add_post("/api/devices/revoke", handle_devices_revoke)
 
     phone = web.Application(client_max_size=1024 * 1024 * 1024)  # 1GB max upload
     phone.router.add_post("/api/ingest", handle_ingest)
     phone.router.add_put("/api/ingest", handle_ingest)
+    phone.router.add_post("/api/pair", handle_pair)
 
     web_ui = web.Application()
     web_ui.router.add_get("/", handle_index)
