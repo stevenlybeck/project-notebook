@@ -104,6 +104,7 @@ Task checklist (build after A+B; depends on B's persisted state for device token
 - **HTTPS on LAN** — only worth it if the trusted-LAN threat model stops being adequate.
 - **QuickShare ingestion** — investigate using QuickShare (Google's cross-platform Nearby Share) as an alternate transport. Could provide a zero-config "send to Mac" path that bypasses LAN/IP/token plumbing entirely, and would extend reach beyond iOS to Android and ChromeOS. Open questions: does the macOS QuickShare client expose a programmable hook, or would the hub need to watch a drop folder?
 - **iOS auto-bump build number** — set `VERSIONING_SYSTEM = "apple-generic"` in pbxproj and add a pre-archive script that sets `CURRENT_PROJECT_VERSION` to either a Unix timestamp (`date +%s`) or `git rev-list --count HEAD`. Apple rejects re-uploads with the same `CFBundleVersion` within a marketing version, so this removes the "remember to bump the build number" tax. Defer until manual bumping in the Xcode UI becomes annoying.
+- **In-depth architecture review** — once the core features (workstreams A–D) are implemented, do a holistic pass over the whole system (hub/agent split, content-addressed storage, the three security planes, API surface, CLI ergonomics) for consistency and simplification before the design ossifies. Best done with working code in hand, not up front.
 
 ## Artifact Processing
 
