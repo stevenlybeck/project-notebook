@@ -16,6 +16,7 @@ import asyncio
 import json
 import os
 import secrets
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -471,6 +472,30 @@ def make_apps():
     return local, phone, web_ui
 
 
+async def _advertise_mdns():
+    """Advertise the hub on the LAN as _notebook._tcp.local. Returns the
+    AsyncZeroconf instance, or None if advertisement fails (discovery is a
+    convenience — a manually entered URL still works without it)."""
+    try:
+        from zeroconf import ServiceInfo
+        from zeroconf.asyncio import AsyncZeroconf
+        info = ServiceInfo(
+            "_notebook._tcp.local.",
+            "Project Notebook._notebook._tcp.local.",
+            addresses=[socket.inet_aton(pairing.lan_ip())],
+            port=PORT,
+            properties={"v": "1"},
+            server="projectnotebook-hub.local.",
+        )
+        aiozc = AsyncZeroconf()
+        await aiozc.async_register_service(info)
+        print(f"[hub] mDNS: advertising _notebook._tcp.local on port {PORT}")
+        return aiozc
+    except Exception as e:
+        print(f"[hub] mDNS advertisement failed ({e}); discovery off, manual URL still works")
+        return None
+
+
 async def _serve():
     load_state()
     STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -498,7 +523,14 @@ async def _serve():
     print(f"[hub] local socket: {sock_path}")
     print(f"[hub] phone API:    http://0.0.0.0:{PORT}")
     print(f"[hub] web UI:       http://127.0.0.1:{WEB_PORT}")
-    await asyncio.Event().wait()
+
+    aiozc = await _advertise_mdns()
+    try:
+        await asyncio.Event().wait()
+    finally:
+        if aiozc is not None:
+            await aiozc.async_unregister_all_services()
+            await aiozc.async_close()
 
 
 def run():
