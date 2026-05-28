@@ -10,6 +10,7 @@
 		09EC9EE81A8D65DDE0B9BEB5 /* BackgroundUploadDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CE731E058AE32210CC79301 /* BackgroundUploadDelegate.swift */; };
 		1314F78EEF9050378241941D /* ProjectNotebookApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C682CF7FB86C56178823B60 /* ProjectNotebookApp.swift */; };
 		20FA2DAE279DEA3EB75F758C /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B59835D16B653BB3B5C4424E /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		3EDE94362FC7D893001E2EE2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3EDE94342FC7D56D001E2EE2 /* Assets.xcassets */; };
 		8075765B0772C27F8658AB12 /* BackgroundUploadDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CE731E058AE32210CC79301 /* BackgroundUploadDelegate.swift */; };
 		8F7F35AE10CE146EAA622C7A /* UploadLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB20B3A2AF5B6B7E993D222F /* UploadLog.swift */; };
 		C63D8754130448FC6CC8544A /* UploadLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB20B3A2AF5B6B7E993D222F /* UploadLog.swift */; };
@@ -43,11 +44,12 @@
 /* Begin PBXFileReference section */
 		0A46919EA90B10A5114677AF /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
 		0C682CF7FB86C56178823B60 /* ProjectNotebookApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectNotebookApp.swift; sourceTree = "<group>"; };
-		2C2BC1EEE4701ADF8FD1ADC1 /* ProjectNotebook.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ProjectNotebook.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2C2BC1EEE4701ADF8FD1ADC1 /* ProjectNotebook.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ProjectNotebook.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3EDE94342FC7D56D001E2EE2 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		5CE731E058AE32210CC79301 /* BackgroundUploadDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundUploadDelegate.swift; sourceTree = "<group>"; };
 		9A498CF51FDB87F1B1C7C026 /* ProjectNotebook.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ProjectNotebook.entitlements; sourceTree = "<group>"; };
 		B3BDC1458325957E1A567355 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		B59835D16B653BB3B5C4424E /* ShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B59835D16B653BB3B5C4424E /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C23409211B0541897EC9F951 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		CB20B3A2AF5B6B7E993D222F /* UploadLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadLog.swift; sourceTree = "<group>"; };
 		E99837851580BF79FAEEE1FE /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
@@ -79,6 +81,7 @@
 				B3BDC1458325957E1A567355 /* Info.plist */,
 				9A498CF51FDB87F1B1C7C026 /* ProjectNotebook.entitlements */,
 				0C682CF7FB86C56178823B60 /* ProjectNotebookApp.swift */,
+				3EDE94342FC7D56D001E2EE2 /* Assets.xcassets */,
 			);
 			path = ProjectNotebook;
 			sourceTree = "<group>";
@@ -111,6 +114,7 @@
 			buildPhases = (
 				DADED99C147EE4400020F544 /* Sources */,
 				1DDACC6505A1E9622620F065 /* Embed Foundation Extensions */,
+				3EDE94352FC7D82A001E2EE2 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -153,9 +157,6 @@
 					728A9519EEDA54B11F588538 = {
 						DevelopmentTeam = LSHKSFHL5R;
 					};
-					A3F8C45A1A2AA602C83FBCCC = {
-						DevelopmentTeam = LSHKSFHL5R;
-					};
 				};
 			};
 			buildConfigurationList = 325D97E610CE66FCBF68DF58 /* Build configuration list for PBXProject "ProjectNotebook" */;
@@ -177,6 +178,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		3EDE94352FC7D82A001E2EE2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3EDE94362FC7D893001E2EE2 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		25192FE3A0DA0C34B5E8C914 /* Sources */ = {
@@ -342,9 +354,15 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				CURRENT_PROJECT_VERSION = 3;
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.projectnotebook.ProjectNotebook;
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -359,9 +377,15 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				CURRENT_PROJECT_VERSION = 3;
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.projectnotebook.ProjectNotebook;
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -369,15 +393,22 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				DEVELOPMENT_TEAM = LSHKSFHL5R;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
+				CURRENT_PROJECT_VERSION = 3;
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.projectnotebook.ProjectNotebook.ShareExtension;
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -385,15 +416,22 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
+				DEVELOPMENT_TEAM = LSHKSFHL5R;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
+				CURRENT_PROJECT_VERSION = 3;
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.projectnotebook.ProjectNotebook.ShareExtension;
 				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
