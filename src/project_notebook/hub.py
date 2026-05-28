@@ -130,6 +130,11 @@ async def handle_unregister(request):
     return web.json_response({"status": "unregistered", "project": name})
 
 
+def safe_filename(name: str) -> str:
+    """Strip directory components so an upload can't escape the artifacts dir."""
+    return Path(name or "").name or "unnamed"
+
+
 async def handle_ingest(request):
     """Accept a file upload and deliver to the specified project.
 
@@ -139,7 +144,7 @@ async def handle_ingest(request):
     """
     if request.method == "PUT":
         project_name = request.query.get("project", "")
-        filename = request.query.get("filename", "unnamed")
+        filename = safe_filename(request.query.get("filename", "unnamed"))
         upload_id = request.query.get("upload_id", filename)
         content_length = request.content_length
 
@@ -197,7 +202,7 @@ async def handle_ingest(request):
             if part.name == "project":
                 project_name = (await part.text()).strip()
             elif part.name == "file":
-                filename = part.filename or "unnamed"
+                filename = safe_filename(part.filename)
 
                 if not project_name:
                     return web.Response(status=400, text="Missing 'project' field")
