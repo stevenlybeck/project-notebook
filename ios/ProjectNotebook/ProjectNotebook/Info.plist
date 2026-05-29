@@ -37,13 +37,15 @@
 	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-		<!-- NSAllowsLocalNetworking only covers RFC1918 ranges (10/8, 172.16/12,
-		     192.168/16). The paired hub may live on a Tailscale tailnet
-		     (CGNAT 100.64/10) or another overlay, so we also disable ATS to
-		     reach those IPs. Trust comes from the bearer device token + the
-		     user-controlled pairing — not from TLS. -->
+		<!-- IMPORTANT: do NOT add NSAllowsLocalNetworking here. On iOS 10+
+		     its mere presence makes the system IGNORE NSAllowsArbitraryLoads
+		     (Apple's documented "child keys disable the parent" rule), and
+		     NSAllowsLocalNetworking's allowlist only covers RFC1918 ranges
+		     (10/8, 172.16/12, 192.168/16) — it does not cover overlay IPs
+		     like Tailscale's CGNAT (100.64/10), so URLSession will refuse
+		     plaintext requests with -1022. We rely on NSAllowsArbitraryLoads
+		     alone; trust comes from the bearer device token + user-controlled
+		     pairing, same trusted-LAN model we already documented. -->
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>

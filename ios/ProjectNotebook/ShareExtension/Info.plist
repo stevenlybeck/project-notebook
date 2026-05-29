@@ -24,10 +24,10 @@
 	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-		<!-- See main app Info.plist for rationale: Tailscale CGNAT and other
-		     overlays aren't in NSAllowsLocalNetworking's allowlist. -->
+		<!-- See main app Info.plist for the full rationale. Short version:
+		     NSAllowsLocalNetworking's *presence* silently disables
+		     NSAllowsArbitraryLoads on iOS 10+, so we leave it out and rely
+		     on NSAllowsArbitraryLoads alone for overlay-IP support. -->
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
