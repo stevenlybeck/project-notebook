@@ -27,12 +27,22 @@ def _sock_path() -> Path:
     return _state_dir() / "hub.sock"
 
 
+# Local CLI talks to the hub over a Unix domain socket. With aiohttp's
+# UnixConnector the transport IS the socket; the URL's host/port are ignored
+# at the wire level (HTTP requires *some* host, so we use this placeholder).
+# The aiohttp docs cover the connector but not URL construction — see:
+#   https://docs.aiohttp.org/en/stable/client_advanced.html
+#   https://github.com/aio-libs/aiohttp/issues/11324  (open issue asking for
+#     better docs / base_url support for exactly this case)
+_HUB_URL_BASE = "http://localhost"
+
+
 async def _request(method: str, path: str, payload: dict | None = None, timeout: float = 5.0):
     conn = aiohttp.UnixConnector(path=str(_sock_path()))
     async with aiohttp.ClientSession(
         connector=conn, timeout=aiohttp.ClientTimeout(total=timeout)
     ) as session:
-        async with session.request(method, "http://localhost" + path, json=payload) as r:
+        async with session.request(method, _HUB_URL_BASE + path, json=payload) as r:
             r.raise_for_status()
             return await r.json()
 
@@ -87,7 +97,7 @@ async def _stream_session(name: str, path: str):
     """Hold an SSE pipe to the hub: the project is registered while connected,
     and each artifact prints one stdout line (a Monitor event). Reconnects with
     backoff if the connection drops; runs until the process is killed."""
-    url = f"http://localhost/api/session?project={quote(name)}&path={quote(path)}"
+    url = f"{_HUB_URL_BASE}/api/session?project={quote(name)}&path={quote(path)}"
     while True:
         try:
             conn = aiohttp.UnixConnector(path=str(_sock_path()))
