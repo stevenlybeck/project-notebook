@@ -463,6 +463,8 @@ def make_apps():
     phone.router.add_post("/api/ingest", handle_ingest)
     phone.router.add_put("/api/ingest", handle_ingest)
     phone.router.add_post("/api/pair", handle_pair)
+    phone.router.add_get("/api/projects", handle_projects)  # device lists projects to pick one
+    phone.router.add_get("/api/uploads", handle_uploads)    # device polls its own upload progress
 
     web_ui = web.Application(middlewares=[require_local_host])
     web_ui.router.add_get("/", handle_index)
