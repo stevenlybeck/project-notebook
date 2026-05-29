@@ -26,6 +26,10 @@
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
+		<!-- See main app Info.plist for rationale: Tailscale CGNAT and other
+		     overlays aren't in NSAllowsLocalNetworking's allowlist. -->
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
 	</dict>
 	<key>NSExtension</key>
 	<dict>

@@ -113,7 +113,7 @@ final class PairingManager: ObservableObject {
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.timeoutInterval = 2.5
+        req.timeoutInterval = 5  // first connection over Tailscale/VPN can take a few seconds
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try? JSONSerialization.data(
             withJSONObject: ["code": code, "device_name": UIDevice.current.name])
