@@ -111,6 +111,7 @@ Task checklist (build after A+B; depends on B's persisted state for device token
   - **Context lives in the interactive session, not the waiter.** A Claude Code "agent" is really an interactive terminal session (alive while you type, asleep otherwise); an always-on long-poller is a separate process with no conversation context of its own. So the shape is: a lightweight waiter holds the long-poll, but the recent-conversation context that processes an artifact comes from the live session (the parent) — there's a handoff between "the thing that waits" and "the thing that has context" to design.
   - **Cycle:** register → long-poll → on event, hand off + process → re-register/renew (ties into the TTL renewal in the durable-state work) → long-poll again.
   - Hub side: long-poll support on `/api/events` (hold the connection until an event or timeout). Squarely workstream D.
+- **Accurate Swift diagnostics for the editor/LSP** — set up [`xcode-build-server`](https://github.com/SolaWing/xcode-build-server) (`brew install`, then `xcode-build-server config -scheme ProjectNotebook -project ProjectNotebook.xcodeproj` → `buildServer.json`, gitignored) so sourcekit-lsp gets Xcode's real compile flags. Without it, the LSP analyzes Swift files with no iOS SDK/module context and emits false "No such module 'UIKit'" / "Cannot find type X" noise. Purely a local dev-experience improvement — no effect on the Xcode build. Bonus: turns the LSP into a real pre-build error signal.
 
 ## Artifact Processing
 
