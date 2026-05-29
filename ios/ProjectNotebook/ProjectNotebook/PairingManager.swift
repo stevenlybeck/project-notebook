@@ -2,10 +2,11 @@ import SwiftUI
 import UIKit
 
 /// Drives pairing. Initiated by scanning the hub's QR with the system Camera,
-/// which opens projectnotebook://pair?url=…&code=… and routes here. We confirm
-/// Local Network permission (awaiting the user's answer), redeem the code at
-/// <url>/api/pair, store the device token in the shared keychain, and save the
-/// hub URL for the extension.
+/// which opens projectnotebook://pair?url=…&url=…&code=… and routes here. The
+/// QR encodes every IPv4 address the phone might be able to reach (LAN,
+/// Tailscale, other overlays); we confirm Local Network permission, try each
+/// `url=` value in order, store the device token in the shared keychain on the
+/// first success, and save the *working* URL for the extension to use.
 @MainActor
 final class PairingManager: ObservableObject {
     enum State: Equatable {
@@ -18,7 +19,7 @@ final class PairingManager: ObservableObject {
     @Published private(set) var state: State = .idle
 
     private let defaults = UserDefaults(suiteName: "group.projectnotebook")
-    private var pending: (hub: String, code: String)?
+    private var pending: (hubs: [String], code: String)?
 
     var hubURL: String { defaults?.string(forKey: "hubURL") ?? "" }
 
@@ -40,12 +41,16 @@ final class PairingManager: ObservableObject {
         guard url.scheme == "projectnotebook", url.host == "pair",
               let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let items = comps.queryItems,
-              let hub = items.first(where: { $0.name == "url" })?.value,
               let code = items.first(where: { $0.name == "code" })?.value else {
             state = .failed(message: "That QR code isn't a valid pairing link.", offerSettings: false)
             return
         }
-        pending = (hub, code)
+        let hubs = items.filter { $0.name == "url" }.compactMap { $0.value }
+        guard !hubs.isEmpty else {
+            state = .failed(message: "That QR code isn't a valid pairing link.", offerSettings: false)
+            return
+        }
+        pending = (hubs, code)
         Task { await pair() }
     }
 
@@ -63,11 +68,11 @@ final class PairingManager: ObservableObject {
     }
 
     private func pair() async {
-        guard let (hub, code) = pending else { return }
+        guard let (hubs, code) = pending else { return }
         state = .connecting
 
         // Confirm Local Network permission first. This awaits the user's answer
-        // to the system prompt, so the request below runs only once it's granted.
+        // to the system prompt, so the requests below run only once it's granted.
         let granted = await LocalNetworkAuthorization.shared.requestAuthorization()
         guard granted else {
             state = .failed(
@@ -76,14 +81,39 @@ final class PairingManager: ObservableObject {
             return
         }
 
+        for hub in hubs {
+            switch await attemptPair(hub: hub, code: code) {
+            case .success:
+                return
+            case .failedHard(let message):
+                // The hub responded with a real HTTP status (expired code,
+                // unexpected response, etc.) — same code + same hub state for
+                // every candidate, so don't bother trying others.
+                pending = nil
+                state = .failed(message: message, offerSettings: false)
+                return
+            case .unreachable:
+                continue  // try the next address
+            }
+        }
+        state = .failed(
+            message: "Couldn't reach the hub at any address in the code. Make sure your phone and Mac share a network (Wi-Fi, Tailscale, …), then scan again.",
+            offerSettings: false)
+    }
+
+    private enum AttemptResult {
+        case success
+        case failedHard(message: String)
+        case unreachable
+    }
+
+    private func attemptPair(hub: String, code: String) async -> AttemptResult {
         guard let url = URL(string: "\(hub)/api/pair") else {
-            pending = nil
-            state = .failed(message: "The hub address looks malformed.", offerSettings: false)
-            return
+            return .failedHard(message: "The hub address looks malformed.")
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.timeoutInterval = 8
+        req.timeoutInterval = 2.5
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try? JSONSerialization.data(
             withJSONObject: ["code": code, "device_name": UIDevice.current.name])
@@ -91,34 +121,28 @@ final class PairingManager: ObservableObject {
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             guard let http = resp as? HTTPURLResponse else {
-                state = .failed(message: "Unexpected response from the hub.", offerSettings: false)
-                return
+                return .failedHard(message: "Unexpected response from the hub.")
             }
             switch http.statusCode {
             case 200:
                 guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let token = json["token"] as? String,
                       let deviceID = json["device_id"] as? String else {
-                    state = .failed(message: "The hub sent an unexpected response.", offerSettings: false)
-                    return
+                    return .failedHard(message: "The hub sent an unexpected response.")
                 }
                 TokenStore.savePairing(token: token, deviceID: deviceID)
-                defaults?.set(hub, forKey: "hubURL")
+                defaults?.set(hub, forKey: "hubURL")  // save the *working* address
                 pending = nil
                 isPaired = true
                 state = .idle
+                return .success
             case 403:
-                pending = nil
-                state = .failed(
-                    message: "That pairing code expired. Re-run `project-notebook pair` on your Mac and scan again.",
-                    offerSettings: false)
+                return .failedHard(message: "That pairing code expired. Re-run `project-notebook pair` on your Mac and scan again.")
             default:
-                state = .failed(message: "Pairing failed (HTTP \(http.statusCode)).", offerSettings: false)
+                return .failedHard(message: "Pairing failed (HTTP \(http.statusCode)).")
             }
         } catch {
-            state = .failed(
-                message: "Couldn't reach the hub. Make sure your phone is on the same Wi-Fi as your Mac, then scan again.",
-                offerSettings: false)
+            return .unreachable
         }
     }
 }

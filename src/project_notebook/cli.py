@@ -14,7 +14,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse, urlunparse
 
 import aiohttp
 
@@ -147,9 +147,23 @@ def cmd_pair(args):
     from . import pairing
     _ensure_hub_running()
     resp = _post("/api/pair/new", {})
-    deep_link = f"projectnotebook://pair?url={resp['lan_url']}&code={resp['code']}"
+    if args.address:
+        # Override: encode just the given host (keeping the hub's chosen port).
+        u = urlparse(resp["lan_url"])
+        netloc = f"{args.address}:{u.port}" if u.port else args.address
+        urls = [urlunparse(u._replace(netloc=netloc))]
+    else:
+        urls = resp.get("lan_urls") or [resp["lan_url"]]
+    # Encode every candidate so the phone can try each — repeated ?url= keys are
+    # legal per RFC 3986 and parsed as a list by URLComponents on iOS.
+    query = "&".join(f"url={quote(u, safe='')}" for u in urls) + f"&code={quote(resp['code'])}"
+    deep_link = f"projectnotebook://pair?{query}"
     print(pairing.render_qr(deep_link))
-    print(f"Scan within {resp['ttl']}s to pair. Hub: {resp['lan_url']}")
+    print("Hub address(es) encoded (phone will try each):")
+    for u in urls:
+        print(f"  {u}")
+    print(f"Link: {deep_link}")
+    print(f"Scan within {resp['ttl']}s.")
 
 
 def cmd_devices(args):
@@ -186,6 +200,7 @@ def main(argv=None):
     p.set_defaults(func=cmd_install_claude_code_skill)
 
     p = sub.add_parser("pair", help="Pair a phone by printing a QR code to scan")
+    p.add_argument("--address", metavar="HOST", help="Override the hub host in the QR (e.g. your Tailscale IP, when mDNS/LAN is blocked)")
     p.set_defaults(func=cmd_pair)
 
     p = sub.add_parser("devices", help="List or revoke paired devices")

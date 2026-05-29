@@ -372,15 +372,25 @@ async def handle_health(request):
 
 
 async def handle_pair_new(request):
-    """Local plane: mint a single-use pairing code + a pending device token."""
+    """Local plane: mint a single-use pairing code + a pending device token.
+
+    Returns every IPv4 address the phone might be able to reach (LAN, Tailscale,
+    other overlays). The CLI encodes all of them in the QR; the phone tries each
+    until one connects. `lan_url` is kept as the primary for back-compat."""
     code = pairing.new_code()
     pending_pairings[code] = {
         "token": pairing.new_token(),
         "device_id": pairing.new_device_id(),
         "expires": time.time() + pairing.PAIRING_TTL,
     }
-    lan_url = f"http://{pairing.lan_ip()}:{PORT}"
-    return web.json_response({"code": code, "lan_url": lan_url, "ttl": pairing.PAIRING_TTL})
+    addresses = pairing.lan_addresses() or [pairing.lan_ip()]
+    lan_urls = [f"http://{ip}:{PORT}" for ip in addresses]
+    return web.json_response({
+        "code": code,
+        "lan_url": lan_urls[0],
+        "lan_urls": lan_urls,
+        "ttl": pairing.PAIRING_TTL,
+    })
 
 
 async def handle_pair(request):
