@@ -25,13 +25,34 @@ Start a **persistent Monitor** running the registration pipe:
 - **persistent:** `true`
 - **description:** `artifacts shared to <project>`
 
-The command holds an open pipe to the hub: the project stays registered while it
-runs, and it prints one line per shared artifact — `New artifact: <filename>
-(<path>)`. Each line arrives as a notification.
+The command holds an open pipe to the hub: the project stays registered while
+it runs, and it prints lines of two kinds:
 
-**When an artifact notification arrives:** read the file at the given path and
-use it in the context of whatever we're working on (e.g. a screenshot of a bug,
-a photo of hardware, a voice memo). Don't wait to be asked — that's the point.
+- **`New artifact: <filename>  (<path>)`** — a file just arrived from the
+  phone. The path points inside a per-artifact subdirectory in the hub's
+  store: `~/.project-notebook/artifacts/<project>/<filename>.d/<filename>`.
+  The artifact and all its sidecars live together there; your project repo
+  isn't touched.
+- **`Processed: <filename> via <processor> -> <output1>, <output2>, … (in <sidecar_dir>)`** —
+  a processor finished writing sidecars next to that file. Common sidecars are
+  `meta.yaml` (format/duration/dimensions), `audio.wav` (extracted audio),
+  `poster.jpg` (mid-frame for video), `transcript.md` (Whisper transcription
+  with timestamps).
 
-When the Monitor is stopped or the session ends, the pipe closes and the hub
-deregisters the project automatically.
+## When a notification arrives
+
+Don't wait to be asked — that's the point.
+
+1. On **`New artifact`**: read the file at the given path so you have its raw
+   content. Note the sidecar directory (the parent of the path) — more will
+   often arrive there.
+2. On **`Processed`**: read each named sidecar file. `meta.yaml` tells you what
+   the artifact *is*; `transcript.md` is usually the most useful for
+   audio/video and lets you answer questions about what was said; `poster.jpg`
+   is a single still that's quick to look at.
+3. Use everything you have to react in the context of what we're working on —
+   for example, a photo of a breadboard during an I²C debugging session,
+   a voice memo describing a bug, a screenshot of a stack trace.
+
+The session and its pipe close when the Monitor is stopped or the session
+ends; the hub deregisters the project automatically.

@@ -112,7 +112,19 @@ async def _stream_session(name: str, path: str):
                             event = json.loads(line[len("data:"):].strip())
                         except json.JSONDecodeError:
                             continue
-                        print(f"New artifact: {event.get('filename', '?')}  ({event.get('path', '')})", flush=True)
+                        etype = event.get("type")
+                        if etype == "artifact_received":
+                            print(f"New artifact: {event.get('filename', '?')}  ({event.get('path', '')})", flush=True)
+                        elif etype == "artifact_processed":
+                            proc = event.get("processor", "?")
+                            outs = event.get("outputs") or []
+                            err = event.get("error")
+                            name = event.get("filename", "?")
+                            sidecar = event.get("sidecar_dir", "")
+                            if outs:
+                                print(f"Processed: {name} via {proc} -> {', '.join(outs)} (in {sidecar})", flush=True)
+                            elif err:
+                                print(f"Processed: {name} via {proc} skipped: {err}", flush=True)
         except (aiohttp.ClientError, OSError):
             pass  # connection dropped — reconnect with backoff
         await asyncio.sleep(2)

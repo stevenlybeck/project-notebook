@@ -20,11 +20,12 @@ from pathlib import Path
 
 from aiohttp import web
 
-from . import pairing
+from . import pairing, processors
 
 # Persistent state directory (override with PROJECT_NOTEBOOK_HOME).
 STATE_DIR = Path(os.environ.get("PROJECT_NOTEBOOK_HOME", Path.home() / ".project-notebook"))
 STATE_FILE = STATE_DIR / "state.json"
+HUB_ARTIFACTS_DIR = STATE_DIR / "artifacts"  # central artifact store (per-project subdirs)
 PORT = int(os.environ.get("PROJECT_NOTEBOOK_PORT", "9999"))          # phone API (LAN)
 WEB_PORT = int(os.environ.get("PROJECT_NOTEBOOK_WEB_PORT", "9877"))  # web UI (loopback)
 
@@ -66,22 +67,48 @@ def record_event(event_type: str, project: str, **payload) -> dict:
     return event
 
 
-def get_artifacts(project_path: str) -> list:
-    """List artifacts in a project's artifacts directory."""
-    artifacts_dir = Path(project_path) / "artifacts"
-    if not artifacts_dir.exists():
+async def _run_processors(artifact_path: Path, project: str) -> None:
+    """Run every applicable processor for the ingested artifact, emitting one
+    `artifact_processed` event per completion down the project's session pipes."""
+    def emit(processor_name: str, result: dict) -> None:
+        record_event(
+            "artifact_processed",
+            project,
+            filename=artifact_path.name,
+            sidecar_dir=str(artifact_path.parent),
+            processor=processor_name,
+            outputs=result.get("outputs", []),
+            error=result.get("error"),
+        )
+    try:
+        await processors.run_for_artifact(artifact_path, emit)
+    except Exception as e:
+        print(f"[hub] processor dispatch error for {artifact_path}: {e}")
+
+
+def get_artifacts(project: str) -> list:
+    """List artifacts for ``project`` in the hub's central store.
+
+    Each artifact lives in HUB_ARTIFACTS_DIR/<project>/<filename>.d/ — a subdir
+    holding the original plus any processed sidecars."""
+    project_dir = HUB_ARTIFACTS_DIR / project
+    if not project_dir.exists():
         return []
-    files = []
-    for f in sorted(artifacts_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-        if f.name.startswith("."):
+    items = []
+    for sub in sorted(project_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not (sub.is_dir() and sub.name.endswith(".d") and not sub.name.startswith(".")):
             continue
-        stat = f.stat()
-        files.append({
-            "name": f.name,
+        original_name = sub.name[:-2]
+        original = sub / original_name
+        if not original.exists():
+            continue
+        stat = original.stat()
+        items.append({
+            "name": original_name,
             "size": stat.st_size,
             "modified": stat.st_mtime,
         })
-    return files
+    return items
 
 
 def format_size(size: int) -> str:
@@ -100,7 +127,7 @@ async def handle_index(request):
 
 async def handle_projects(request):
     return web.json_response({"projects": [
-        {"name": name, "path": info["path"], "artifacts": get_artifacts(info["path"])}
+        {"name": name, "path": info["path"], "artifacts": get_artifacts(name)}
         for name, info in projects.items()
     ]})
 
@@ -148,6 +175,27 @@ def safe_filename(name: str) -> str:
     return Path(name or "").name or "unnamed"
 
 
+def _allocate_artifact_dir(project: str, filename: str) -> tuple[Path, Path, str]:
+    """Allocate HUB_ARTIFACTS_DIR/<project>/<filename>.d/ for a new artifact and
+    return (artifact_dir, dest_file_path, final_filename). The subdir holds the
+    original and all sidecars (meta.yaml, transcript.md, …) for that artifact;
+    everything for one project lives together under the hub's central store,
+    not in the project's working repo. Dedups by appending _1, _2, … to both
+    the subdir name and the inner file."""
+    project_dir = HUB_ARTIFACTS_DIR / project
+    project_dir.mkdir(parents=True, exist_ok=True)
+    stem = Path(filename).stem
+    suffix = Path(filename).suffix
+    candidate = filename
+    counter = 0
+    while (project_dir / f"{candidate}.d").exists():
+        counter += 1
+        candidate = f"{stem}_{counter}{suffix}"
+    artifact_dir = project_dir / f"{candidate}.d"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    return artifact_dir, artifact_dir / candidate, candidate
+
+
 async def handle_ingest(request):
     """Accept a file upload and deliver to the specified project.
 
@@ -167,17 +215,7 @@ async def handle_ingest(request):
         if project_name not in projects:
             return web.Response(status=404, text=f"Project '{project_name}' not registered")
 
-        project_path = Path(projects[project_name]["path"])
-        artifacts_dir = project_path / "artifacts"
-        artifacts_dir.mkdir(parents=True, exist_ok=True)
-
-        dest = artifacts_dir / filename
-        counter = 1
-        while dest.exists():
-            stem = Path(filename).stem
-            suffix = Path(filename).suffix
-            dest = artifacts_dir / f"{stem}_{counter}{suffix}"
-            counter += 1
+        artifact_dir, dest, filename = _allocate_artifact_dir(project_name, filename)
 
         active_uploads[upload_id] = {
             "filename": filename,
@@ -222,17 +260,7 @@ async def handle_ingest(request):
                 if project_name not in projects:
                     return web.Response(status=404, text=f"Project '{project_name}' not registered")
 
-                project_path = Path(projects[project_name]["path"])
-                artifacts_dir = project_path / "artifacts"
-                artifacts_dir.mkdir(parents=True, exist_ok=True)
-
-                dest = artifacts_dir / filename
-                counter = 1
-                while dest.exists():
-                    stem = Path(filename).stem
-                    suffix = Path(filename).suffix
-                    dest = artifacts_dir / f"{stem}_{counter}{suffix}"
-                    counter += 1
+                artifact_dir, dest, filename = _allocate_artifact_dir(project_name, filename)
 
                 size = 0
                 with open(dest, "wb") as f:
@@ -251,6 +279,11 @@ async def handle_ingest(request):
             return web.Response(status=400, text="Missing 'file' field")
 
     record_event("artifact_received", project_name, filename=dest.name, path=str(dest))
+
+    # Run processors in the background — Whisper can take a while; we don't want
+    # to keep the ingest response open while it runs. Each processor result is
+    # pushed down the session pipe as an `artifact_processed` event.
+    asyncio.create_task(_run_processors(dest, project_name))
 
     subprocess.run([
         "osascript", "-e",
