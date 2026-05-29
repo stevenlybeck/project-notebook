@@ -50,6 +50,7 @@ final class PairingManager: ObservableObject {
             state = .failed(message: "That QR code isn't a valid pairing link.", offerSettings: false)
             return
         }
+        print("[Pair] received deep link with \(hubs.count) hub URL(s): \(hubs)")
         pending = (hubs, code)
         Task { await pair() }
     }
@@ -81,30 +82,36 @@ final class PairingManager: ObservableObject {
             return
         }
 
+        var failures: [String] = []
         for hub in hubs {
+            print("[Pair] attempting \(hub)")
             switch await attemptPair(hub: hub, code: code) {
             case .success:
+                print("[Pair] paired via \(hub)")
                 return
             case .failedHard(let message):
                 // The hub responded with a real HTTP status (expired code,
                 // unexpected response, etc.) — same code + same hub state for
                 // every candidate, so don't bother trying others.
+                print("[Pair] hard failure: \(message)")
                 pending = nil
                 state = .failed(message: message, offerSettings: false)
                 return
-            case .unreachable:
-                continue  // try the next address
+            case .unreachable(let detail):
+                print("[Pair] unreachable: \(hub) — \(detail)")
+                failures.append("• \(hub) — \(detail)")
             }
         }
+        let breakdown = failures.joined(separator: "\n")
         state = .failed(
-            message: "Couldn't reach the hub at any address in the code. Make sure your phone and Mac share a network (Wi-Fi, Tailscale, …), then scan again.",
+            message: "Couldn't reach the hub at any address:\n\(breakdown)\n\nMake sure your phone and Mac share a network (Wi-Fi, Tailscale, …), then scan again.",
             offerSettings: false)
     }
 
     private enum AttemptResult {
         case success
         case failedHard(message: String)
-        case unreachable
+        case unreachable(detail: String)
     }
 
     private func attemptPair(hub: String, code: String) async -> AttemptResult {
@@ -142,7 +149,24 @@ final class PairingManager: ObservableObject {
                 return .failedHard(message: "Pairing failed (HTTP \(http.statusCode)).")
             }
         } catch {
-            return .unreachable
+            return .unreachable(detail: shortError(error))
+        }
+    }
+
+    /// Map URLSession errors to compact human-readable labels (so the failure
+    /// screen and Xcode console both show what actually went wrong).
+    private func shortError(_ error: Error) -> String {
+        let nsErr = error as NSError
+        switch nsErr.code {
+        case NSURLErrorTimedOut: return "timeout"
+        case NSURLErrorCannotConnectToHost: return "cannot connect to host"
+        case NSURLErrorCannotFindHost: return "cannot find host"
+        case NSURLErrorNetworkConnectionLost: return "connection lost"
+        case NSURLErrorNotConnectedToInternet: return "no network"
+        case NSURLErrorAppTransportSecurityRequiresSecureConnection:
+            return "ATS blocked plaintext (-1022)"
+        default:
+            return "\(error.localizedDescription) (\(nsErr.code))"
         }
     }
 }
