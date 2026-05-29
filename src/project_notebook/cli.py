@@ -77,6 +77,7 @@ def cmd_hub(args):
 
 
 def cmd_register(args):
+    _ensure_hub_running()  # synchronous; must happen before entering an event loop
     name = args.name or Path.cwd().name
     path = str(Path.cwd())
     asyncio.run(_stream_session(name, path))
@@ -84,17 +85,10 @@ def cmd_register(args):
 
 async def _stream_session(name: str, path: str):
     """Hold an SSE pipe to the hub: the project is registered while connected,
-    and each artifact prints one stdout line (a Monitor event). Reconnects if
-    the hub restarts; runs until the process is killed."""
+    and each artifact prints one stdout line (a Monitor event). Reconnects with
+    backoff if the connection drops; runs until the process is killed."""
     url = f"http://localhost/api/session?project={quote(name)}&path={quote(path)}"
     while True:
-        if not _hub_alive():
-            try:
-                _ensure_hub_running()
-            except SystemExit as e:
-                print(e, file=sys.stderr, flush=True)
-                await asyncio.sleep(2)
-                continue
         try:
             conn = aiohttp.UnixConnector(path=str(_sock_path()))
             async with aiohttp.ClientSession(connector=conn) as session:
@@ -110,8 +104,8 @@ async def _stream_session(name: str, path: str):
                             continue
                         print(f"New artifact: {event.get('filename', '?')}  ({event.get('path', '')})", flush=True)
         except (aiohttp.ClientError, OSError):
-            pass  # connection dropped (e.g. hub restart) — reconnect
-        await asyncio.sleep(1)
+            pass  # connection dropped — reconnect with backoff
+        await asyncio.sleep(2)
 
 
 def cmd_status(args):
