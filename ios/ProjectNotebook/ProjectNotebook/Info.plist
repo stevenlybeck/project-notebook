@@ -14,6 +14,17 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.projectnotebook.pair</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>projectnotebook</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundlePackageType</key>
@@ -31,6 +42,13 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Project Notebook needs local network access to connect to the hub on your Mac.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_notebook._tcp</string>
+		<string>_preflight_check._tcp</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict/>
 	<key>UIStatusBarStyle</key>
 	<string></string>
 	<key>UISupportedInterfaceOrientations</key>

@@ -131,8 +131,12 @@ class ShareViewController: UIViewController {
             showStatus("Invalid hub URL")
             return
         }
+        var request = URLRequest(url: url)
+        if let token = TokenStore.token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
 
-        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if let error = error {
@@ -288,6 +292,9 @@ class ShareViewController: UIViewController {
         var request = URLRequest(url: ingestURL)
         request.httpMethod = "PUT"
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        if let token = TokenStore.token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
 
         let task = session.uploadTask(with: request, fromFile: fileURL)
         task.taskDescription = recordID.uuidString

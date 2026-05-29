@@ -3,10 +3,13 @@ import SwiftUI
 @main
 struct ProjectNotebookApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegateAdaptor
+    @StateObject private var pairing = PairingManager()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(pairing)
+                .onOpenURL { pairing.handlePairingURL($0) }
         }
     }
 }
@@ -35,70 +38,92 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 /// list of all uploads (past and in-progress). On every 2-second refresh, tells AppDelegate
 /// to claim any new background sessions so we receive progress and completion callbacks.
 struct ContentView: View {
-    @AppStorage("hubURL", store: UserDefaults(suiteName: "group.projectnotebook"))
-    var hubURL: String = ""
-
+    @EnvironmentObject var pairing: PairingManager
+    @Environment(\.scenePhase) private var scenePhase
     @State private var uploads: [UploadRecord] = []
     @State private var showLogs = false
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationView {
-            List {
-                Section("Hub") {
-                    HStack {
-                        TextField("http://your-mac.local:9999", text: $hubURL)
-                            .autocapitalization(.none)
-                            .disableAutocorrection(true)
-                            .keyboardType(.URL)
-
-                        if !hubURL.isEmpty {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                        }
-                    }
-                }
-
-                Section("Uploads") {
-                    if uploads.isEmpty {
-                        Text("No uploads yet. Use the Share button in any app to send files.")
-                            .foregroundColor(.secondary)
-                            .font(.subheadline)
-                    } else {
-                        ForEach(uploads) { upload in
-                            UploadRow(upload: upload)
-                        }
-                    }
+            Group {
+                if pairing.isPaired {
+                    pairedList
+                } else {
+                    PairingView()
                 }
             }
-            .navigationTitle("Project Notebook")
+            .navigationTitle(pairing.isPaired ? "Project Notebook" : "")
+            .navigationBarTitleDisplayMode(pairing.isPaired ? .large : .inline)
             .toolbar {
-                Button("Logs") { showLogs = true }
+                if pairing.isPaired {
+                    Button("Logs") { showLogs = true }
+                }
             }
             .sheet(isPresented: $showLogs) {
                 LogView()
             }
             .onAppear { refreshUploads() }
             .onReceive(timer) { _ in refreshUploads() }
+            .onChange(of: scenePhase) { newPhase in
+                if newPhase == .active { pairing.retryIfPending() }
+            }
         }
     }
 
+    private var pairedList: some View {
+        List {
+            Section("Hub") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Connected").fontWeight(.medium)
+                        Text(pairing.hubURL)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                }
+                Button("Unpair", role: .destructive) { pairing.unpair() }
+            }
+
+            Section("Uploads") {
+                if uploads.isEmpty {
+                    Text("No uploads yet. Use the Share button in any app to send files.")
+                        .foregroundColor(.secondary)
+                        .font(.subheadline)
+                } else {
+                    ForEach(uploads) { upload in
+                        UploadRow(upload: upload)
+                    }
+                }
+            }
+        }
+        .onAppear { HubDiscovery.shared.start() }
+    }
+
     private func refreshUploads() {
-        // Update local records from hub's server-side progress
         pollHubForProgress()
         uploads = UploadLog.shared.loadAll()
     }
 
     private func pollHubForProgress() {
+        let hubURL = pairing.hubURL
         guard !hubURL.isEmpty,
               let url = URL(string: "\(hubURL)/api/uploads") else { return }
 
-        // Only poll if we have uploading records
         let records = UploadLog.shared.loadAll()
         let hasActive = records.contains { $0.status == .uploading || $0.status == .pending }
         guard hasActive else { return }
 
-        URLSession.shared.dataTask(with: url) { data, _, _ in
+        var request = URLRequest(url: url)
+        if let token = TokenStore.token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        URLSession.shared.dataTask(with: request) { data, _, _ in
             guard let data = data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let uploads = json["uploads"] as? [String: [String: Any]] else { return }
@@ -119,6 +144,100 @@ struct ContentView: View {
                 }
             }
         }.resume()
+    }
+}
+
+/// Shown when no device token is stored yet: walks the user through pairing
+/// by scanning the hub's QR with the system Camera (which opens the
+/// projectnotebook:// deep link handled in PairingManager).
+struct PairingView: View {
+    @EnvironmentObject var pairing: PairingManager
+
+    var body: some View {
+        VStack(spacing: 28) {
+            Spacer(minLength: 0)
+            switch pairing.state {
+            case .idle:
+                instructions
+            case .connecting:
+                connecting
+            case .failed(let message, let offerSettings):
+                failure(message: message, offerSettings: offerSettings)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
+    }
+
+    private var instructions: some View {
+        VStack(spacing: 24) {
+            Image(systemName: "qrcode.viewfinder")
+                .font(.system(size: 64))
+                .foregroundColor(.accentColor)
+
+            Text("Connect to your Mac")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            VStack(alignment: .leading, spacing: 14) {
+                Label("On your Mac, run `project-notebook pair`", systemImage: "1.circle.fill")
+                Label("Point your Camera app at the QR code", systemImage: "2.circle.fill")
+                Label("Tap the banner to open and pair", systemImage: "3.circle.fill")
+            }
+            .font(.subheadline)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal)
+        }
+    }
+
+    private var connecting: some View {
+        VStack(spacing: 24) {
+            Image(systemName: "qrcode.viewfinder")
+                .font(.system(size: 64))
+                .foregroundColor(.accentColor)
+
+            Text("Connecting to your Mac…")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            ProgressView()
+
+            Text("Allow Local Network access if you're asked.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func failure(message: String, offerSettings: Bool) -> some View {
+        VStack(spacing: 24) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 64))
+                .foregroundColor(.orange)
+
+            Text("Couldn't pair")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text(message)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal)
+
+            if offerSettings {
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
     }
 }
 
