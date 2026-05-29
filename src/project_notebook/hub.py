@@ -2,14 +2,11 @@
 Project Notebook Hub
 
 Accepts artifact uploads from the iOS Share Extension and delivers them
-to registered projects.
+to active project sessions.
 
-API:
-  POST /api/register    → Register a project {"project": "name", "path": "/abs/path", "ttl": 3600}
-  POST /api/unregister  → Unregister a project {"project": "name"}
-  GET  /api/projects    → List registered projects
-  POST /api/ingest      → Upload a file (multipart: project, file)
-  GET  /                → Web UI
+A project is "registered" only while a Claude session holds an open SSE
+pipe at GET /api/session; closing the pipe deregisters it. Artifacts
+ingested for an active project are pushed down its pipe in real time.
 """
 
 import asyncio
@@ -32,15 +29,16 @@ PORT = int(os.environ.get("PROJECT_NOTEBOOK_PORT", "9999"))          # phone API
 WEB_PORT = int(os.environ.get("PROJECT_NOTEBOOK_WEB_PORT", "9877"))  # web UI (loopback)
 
 # State
-projects: dict = {}  # project_name -> {"path": str, "expires": float}
-devices: dict = {}    # device_id -> {"token": str, "name": str, "paired_at": float}
+devices: dict = {}    # device_id -> {"token": str, "name": str, "paired_at": float}  (persisted)
 # In-memory only (lost on restart, which is fine):
+projects: dict = {}          # project_name -> {"path": str}  — registered while a session pipe is open
+sessions: dict = {}          # project_name -> set[asyncio.Queue]  — open SSE pipes feeding the agent
 active_uploads: dict = {}    # upload_id -> {"filename": str, "project": str, "received": int, "total": int or None, "status": str}
 pending_pairings: dict = {}  # code -> {"token": str, "device_id": str, "expires": float}
 
 
 def load_state():
-    """Load persisted registrations and devices; drop already-expired registrations."""
+    """Load persisted devices. Registrations are connection-bound, not persisted."""
     if not STATE_FILE.exists():
         return
     try:
@@ -48,20 +46,24 @@ def load_state():
     except (json.JSONDecodeError, OSError) as e:
         print(f"[hub] Could not read {STATE_FILE} ({e}); starting empty")
         return
-    now = time.time()
-    for name, info in data.get("projects", {}).items():
-        if info.get("expires", 0) > now:
-            projects[name] = info
     devices.update(data.get("devices", {}))
-    print(f"[hub] Loaded {len(projects)} project(s), {len(devices)} device(s) from {STATE_FILE}")
+    print(f"[hub] Loaded {len(devices)} device(s) from {STATE_FILE}")
 
 
 def save_state():
-    """Persist registrations and devices atomically (temp file + rename)."""
+    """Persist devices atomically (temp file + rename)."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
-    tmp.write_text(json.dumps({"projects": projects, "devices": devices}, indent=2))
+    tmp.write_text(json.dumps({"devices": devices}, indent=2))
     tmp.replace(STATE_FILE)
+
+
+def record_event(event_type: str, project: str, **payload) -> dict:
+    """Push an artifact event down all open session pipes for the project."""
+    event = {"type": event_type, "project": project, "ts": time.time(), **payload}
+    for queue in sessions.get(project, set()):
+        queue.put_nowait(event)
+    return event
 
 
 def get_artifacts(project_path: str) -> list:
@@ -90,53 +92,55 @@ def format_size(size: int) -> str:
     return f"{size:.1f} TB"
 
 
-def prune_expired():
-    now = time.time()
-    expired = [name for name, info in projects.items() if info["expires"] < now]
-    for name in expired:
-        del projects[name]
-    if expired:
-        save_state()
-
-
 # --- HTTP handlers ---
 
 async def handle_index(request):
-    prune_expired()
     return web.Response(text=HTML, content_type="text/html")
 
 
 async def handle_projects(request):
-    prune_expired()
-    project_list = [
-        {"name": name, "path": info["path"],
-         "ttl_remaining": max(0, int(info["expires"] - time.time())),
-         "artifacts": get_artifacts(info["path"])}
+    return web.json_response({"projects": [
+        {"name": name, "path": info["path"], "artifacts": get_artifacts(info["path"])}
         for name, info in projects.items()
-    ]
-    return web.json_response({"projects": project_list})
+    ]})
 
 
-async def handle_register(request):
-    body = await request.json()
-    name = body.get("project", "")
-    path = body.get("path", "")
-    ttl = body.get("ttl", 3600)  # default 1 hour
-    if not name or not path:
+async def handle_session(request):
+    """Local plane: a held-open SSE pipe. Registers the project on connect,
+    streams artifact events as they arrive, and deregisters when the
+    connection closes — so "registered" means "has a live session"."""
+    project = request.query.get("project", "")
+    path = request.query.get("path", "")
+    if not project or not path:
         return web.Response(status=400, text="Missing project or path")
-    projects[name] = {"path": path, "expires": time.time() + ttl}
-    save_state()
-    print(f"[hub] Registered project: {name} (path={path}, ttl={ttl}s)")
-    return web.json_response({"status": "registered", "project": name})
 
+    projects[project] = {"path": path}
+    queue: asyncio.Queue = asyncio.Queue()
+    sessions.setdefault(project, set()).add(queue)
+    print(f"[hub] Session opened: {project} ({path})")
 
-async def handle_unregister(request):
-    body = await request.json()
-    name = body.get("project", "")
-    if name in projects:
-        del projects[name]
-        save_state()
-    return web.json_response({"status": "unregistered", "project": name})
+    resp = web.StreamResponse(headers={"Content-Type": "text/event-stream",
+                                       "Cache-Control": "no-cache"})
+    await resp.prepare(request)
+    try:
+        await resp.write(b": connected\n\n")
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=15)
+                await resp.write(f"data: {json.dumps(event)}\n\n".encode())
+            except asyncio.TimeoutError:
+                await resp.write(b": ping\n\n")  # heartbeat; raises once the client is gone
+    except (asyncio.CancelledError, ConnectionResetError, ConnectionError):
+        pass
+    finally:
+        conns = sessions.get(project)
+        if conns is not None:
+            conns.discard(queue)
+            if not conns:
+                del sessions[project]
+                projects.pop(project, None)
+                print(f"[hub] Session closed: {project}")
+    return resp
 
 
 def safe_filename(name: str) -> str:
@@ -160,7 +164,6 @@ async def handle_ingest(request):
         if not project_name:
             return web.Response(status=400, text="Missing 'project' query param")
 
-        prune_expired()
         if project_name not in projects:
             return web.Response(status=404, text=f"Project '{project_name}' not registered")
 
@@ -216,7 +219,6 @@ async def handle_ingest(request):
                 if not project_name:
                     return web.Response(status=400, text="Missing 'project' field")
 
-                prune_expired()
                 if project_name not in projects:
                     return web.Response(status=404, text=f"Project '{project_name}' not registered")
 
@@ -247,6 +249,8 @@ async def handle_ingest(request):
             return web.Response(status=400, text="Missing 'project' field")
         if not dest:
             return web.Response(status=400, text="Missing 'file' field")
+
+    record_event("artifact_received", project_name, filename=dest.name, path=str(dest))
 
     subprocess.run([
         "osascript", "-e",
@@ -324,7 +328,7 @@ async function refresh() {
   const data = await res.json();
   const el = document.getElementById('projects');
   if (data.projects.length === 0) {
-    el.innerHTML = '<p class="no-projects">No projects registered.</p>';
+    el.innerHTML = '<p class="no-projects">No active sessions.</p>';
     return;
   }
   el.innerHTML = data.projects.map(p => {
@@ -341,7 +345,7 @@ async function refresh() {
     return `
     <div class="project">
       <h2>${p.name}</h2>
-      <div class="meta">${p.path} · expires in ${formatTime(p.ttl_remaining)}</div>
+      <div class="meta">${p.path}</div>
       <div class="artifacts">
         <h3>Artifacts (${p.artifacts.length})</h3>
         ${artifactList}
@@ -448,10 +452,9 @@ def make_apps():
     """
     local = web.Application()
     local.router.add_get("/api/health", handle_health)
+    local.router.add_get("/api/session", handle_session)
     local.router.add_get("/api/projects", handle_projects)
     local.router.add_get("/api/uploads", handle_uploads)
-    local.router.add_post("/api/register", handle_register)
-    local.router.add_post("/api/unregister", handle_unregister)
     local.router.add_post("/api/pair/new", handle_pair_new)
     local.router.add_get("/api/devices", handle_devices)
     local.router.add_post("/api/devices/revoke", handle_devices_revoke)

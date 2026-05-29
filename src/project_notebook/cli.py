@@ -8,11 +8,13 @@ HTTP API over loopback, so the hub remains the single source of truth.
 import argparse
 import asyncio
 import importlib.resources as resources
+import json
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 import aiohttp
 
@@ -75,18 +77,41 @@ def cmd_hub(args):
 
 
 def cmd_register(args):
-    _ensure_hub_running()
     name = args.name or Path.cwd().name
     path = str(Path.cwd())
-    resp = _post("/api/register", {"project": name, "path": path, "ttl": args.ttl})
-    print(f"Registered '{resp['project']}' (path={path}, ttl={args.ttl}s)")
+    asyncio.run(_stream_session(name, path))
 
 
-def cmd_unregister(args):
-    _ensure_hub_running()
-    name = args.name or Path.cwd().name
-    _post("/api/unregister", {"project": name})
-    print(f"Unregistered '{name}'")
+async def _stream_session(name: str, path: str):
+    """Hold an SSE pipe to the hub: the project is registered while connected,
+    and each artifact prints one stdout line (a Monitor event). Reconnects if
+    the hub restarts; runs until the process is killed."""
+    url = f"http://localhost/api/session?project={quote(name)}&path={quote(path)}"
+    while True:
+        if not _hub_alive():
+            try:
+                _ensure_hub_running()
+            except SystemExit as e:
+                print(e, file=sys.stderr, flush=True)
+                await asyncio.sleep(2)
+                continue
+        try:
+            conn = aiohttp.UnixConnector(path=str(_sock_path()))
+            async with aiohttp.ClientSession(connector=conn) as session:
+                async with session.get(url) as resp:
+                    print(f"Registered '{name}' — watching for artifacts", file=sys.stderr, flush=True)
+                    async for raw in resp.content:
+                        line = raw.decode(errors="replace").strip()
+                        if not line.startswith("data:"):
+                            continue
+                        try:
+                            event = json.loads(line[len("data:"):].strip())
+                        except json.JSONDecodeError:
+                            continue
+                        print(f"New artifact: {event.get('filename', '?')}  ({event.get('path', '')})", flush=True)
+        except (aiohttp.ClientError, OSError):
+            pass  # connection dropped (e.g. hub restart) — reconnect
+        await asyncio.sleep(1)
 
 
 def cmd_status(args):
@@ -95,11 +120,11 @@ def cmd_status(args):
         return
     projects = _get("/api/projects")["projects"]
     if not projects:
-        print("Hub running. No projects registered.")
+        print("Hub running. No active sessions.")
         return
-    print("Hub running. Registered projects:")
+    print("Hub running. Active sessions:")
     for p in projects:
-        print(f"  {p['name']}  ({p['path']})  expires in {p['ttl_remaining']}s  artifacts: {len(p['artifacts'])}")
+        print(f"  {p['name']}  ({p['path']})  artifacts: {len(p['artifacts'])}")
 
 
 def cmd_install_claude_code_skill(args):
@@ -146,16 +171,11 @@ def main(argv=None):
     p = sub.add_parser("hub", help="Run the hub server (foreground)")
     p.set_defaults(func=cmd_hub)
 
-    p = sub.add_parser("register", help="Register the current project with the hub")
+    p = sub.add_parser("register", help="Open a session pipe: register this project and stream its artifacts (run via Monitor)")
     p.add_argument("name", nargs="?", help="Project name (default: current directory name)")
-    p.add_argument("--ttl", type=int, default=7200, help="Registration TTL in seconds (default 7200)")
     p.set_defaults(func=cmd_register)
 
-    p = sub.add_parser("unregister", help="Unregister a project")
-    p.add_argument("name", nargs="?", help="Project name (default: current directory name)")
-    p.set_defaults(func=cmd_unregister)
-
-    p = sub.add_parser("status", help="Show hub status and registered projects")
+    p = sub.add_parser("status", help="Show the hub and active sessions")
     p.set_defaults(func=cmd_status)
 
     p = sub.add_parser("install-claude-code-skill", help="Install the Claude Code skill into ~/.claude/skills")

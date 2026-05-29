@@ -1,34 +1,37 @@
 ---
 name: notebook-register
-description: Register the current project with the Project Notebook hub server for artifact ingestion
+description: Open a live Project Notebook session — register the current project and stream artifacts shared from your phone into this conversation
 user-invocable: true
-allowed-tools: Bash(project-notebook:*)
-argument-hint: "[project-name] [ttl-seconds]"
+argument-hint: "[project-name]"
 ---
 
-# Register Project with Notebook Hub
+# Open a Project Notebook session
 
-Register the current project with the Project Notebook hub so the iOS Share
-Extension can send artifacts to it. The hub starts automatically if it
-isn't already running.
+Register the current project with the Project Notebook hub and stream artifacts
+shared from your phone directly into this conversation as they arrive. The
+project is registered for exactly as long as this session's pipe is open — no
+TTLs, no staleness.
 
 ## Arguments
 
 - `$0` — Project name (optional; defaults to the current directory name)
-- `$1` — TTL in seconds (optional; defaults to 7200 = 2 hours)
 
 ## Task
 
-1. Run `project-notebook register` using the Bash tool. Pass `$0` as the
-   project name if provided, and `--ttl $1` if a TTL is provided.
-2. Report the result to the user.
+Start a **persistent Monitor** running the registration pipe:
 
-## Examples
+- **command:** `uvx project-notebook register "$0"` — omit the argument to use
+  the current directory's name.
+- **persistent:** `true`
+- **description:** `artifacts shared to <project>`
 
-```bash
-# Use current directory name, default TTL
-project-notebook register
+The command holds an open pipe to the hub: the project stays registered while it
+runs, and it prints one line per shared artifact — `New artifact: <filename>
+(<path>)`. Each line arrives as a notification.
 
-# Explicit name and TTL
-project-notebook register "<name>" --ttl <seconds>
-```
+**When an artifact notification arrives:** read the file at the given path and
+use it in the context of whatever we're working on (e.g. a screenshot of a bug,
+a photo of hardware, a voice memo). Don't wait to be asked — that's the point.
+
+When the Monitor is stopped or the session ends, the pipe closes and the hub
+deregisters the project automatically.
