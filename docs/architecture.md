@@ -73,18 +73,26 @@ Annotations become part of the artifact's permanent record on the hub.
 This is the only contextual data the hub stores; the artifact and its
 processed outputs are otherwise project-agnostic.
 
-### 4. Agent notification = polling on user action, for now.
+### 4. Agent notification = a live SSE pipe per session.
 
-A "long-running agent" in the Claude Code reality is *really* a
-session in a terminal somewhere — alive when the user is interacting,
-asleep otherwise. Live push notifications matter only during active
-sessions; while the session is asleep, processing happens on the hub
-regardless and is ready when the agent next wakes.
+A "long-running agent" in the Claude Code reality is *really* a session
+in a terminal — alive when the user is interacting, asleep otherwise. So
+registration is tied to the session: when a session starts working on a
+project it arms a persistent `Monitor` running `project-notebook
+register`, which holds an **open SSE pipe** to the hub over the local
+socket.
 
-The simplest mechanism that fits this model: the agent uses a
-`UserPromptSubmit` hook to poll the hub on every prompt for new
-artifacts. The injection becomes part of the user's next turn. Push
-mechanisms (SSE, MCP push) are upgrades for later.
+That one pipe does double duty: the project is **registered for exactly
+as long as the pipe is open** (no TTL, no staleness), and each artifact
+ingested for it is **pushed down the pipe** as it arrives. The Monitor
+turns each pushed line into an autonomous mid-conversation notification,
+so a shared artifact reanimates the agent loop the instant it lands —
+the user doesn't have to type. Closing the pipe (session ends)
+deregisters the project automatically.
+
+So "active project" is synonymous with "has a live session," which also
+means the phone's picker only ever lists projects you can actually send
+to.
 
 ### 5. Project-specific extensions via recipes.
 
@@ -98,7 +106,7 @@ letting projects extend the generic processor catalog.
 
 | Entity            | Fields                                                                             |
 | ----------------- | ---------------------------------------------------------------------------------- |
-| **Project**       | name, local path, registered-at, ttl, recipe set                                   |
+| **Project**       | name, local path, recipe set (registered only while a session pipe is open — no TTL) |
 | **Artifact**      | id (sha256), original filename, mime type, size, source, projects[], received-at, processing-status |
 | **ProcessedOutput** | artifact-id, processor name, version, output path(s), produced-at, status        |
 | **Annotation**    | artifact-id, agent-id, session-id, kind (e.g. "context", "conclusion"), content (markdown), turns[], created-at |
@@ -138,9 +146,8 @@ project membership is a pointer.
 
 | Method  | Path                                  | Purpose                                                                 |
 | ------- | ------------------------------------- | ----------------------------------------------------------------------- |
-| `POST`  | `/api/register`                       | Register a project. `{project, path, ttl}` → `{status, project}`        |
-| `POST`  | `/api/unregister`                     | Remove a project registration                                           |
-| `GET`   | `/api/projects`                       | List registered projects                                                |
+| `GET`   | `/api/session?project=X&path=Y`       | Open a held-open SSE pipe: registers the project while connected, streams its artifact events, deregisters on disconnect |
+| `GET`   | `/api/projects`                       | List currently-active projects (those with a live session pipe)         |
 
 ### Artifact ingestion
 
@@ -155,7 +162,7 @@ processors asynchronously, and emits an `artifact_received` event.
 
 | Method  | Path                                                              | Purpose                                                              |
 | ------- | ----------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `GET`   | `/api/events?project=X&since=<timestamp>`                         | Poll for events since a timestamp. Returns artifacts with processing status. |
+| (SSE)   | events stream over the `/api/session` pipe (above)                | Artifact events are pushed down the open session pipe, not polled    |
 | `GET`   | `/api/artifact/<id>`                                              | Artifact metadata + list of processed outputs + annotations          |
 | `GET`   | `/api/artifact/<id>/original`                                     | Download original                                                    |
 | `GET`   | `/api/artifact/<id>/processed/<kind>`                             | Download a specific processed output (e.g. `transcript.md`)          |
@@ -195,12 +202,11 @@ the hub can fail loudly on missing tools rather than silently skipping.
    recipes. Schedules each as a job. Emits `artifact_received` event.
 4. Each processor runs asynchronously, writes to `processed/<kind>`,
    emits a `processing_progress` event on completion (or failure).
-5. When the project agent next wakes, its `UserPromptSubmit` hook
-   polls `GET /api/events?project=X&since=<last-poll>` and gets the
-   list of new artifacts plus their current processing status.
-6. The hook injects a system-reminder block into the next user turn:
-   "An artifact arrived: `<filename>`. Processed outputs available:
-   `[transcript.md, thumbnail.jpg, ...]`. Path: `<api endpoint>`."
+5. The hub pushes an `artifact_received` event down the project's open
+   session pipe (`GET /api/session`, held open by the agent's Monitor).
+6. The Monitor surfaces it as an autonomous notification mid-session —
+   "New artifact: `<filename>` (`<path>`)" — and the agent reads the file
+   and acts, without waiting for the user to type.
 7. The agent fetches whichever processed outputs are useful, discusses
    them with the user in the conversation, and proposes
    project-specific actions (edits, summaries, tasks).
@@ -219,9 +225,11 @@ the hub can fail loudly on missing tools rather than silently skipping.
 - **Annotation deduplication.** If the same artifact is discussed in
   multiple sessions, the hub accumulates many annotations. Worth
   surfacing a "summary of all annotations" view, eventually.
-- **Push vs poll.** This doc assumes the agent polls. The
-  infrastructure for SSE / MCP push exists in principle and would lower
-  latency; defer until the polling experience proves insufficient.
+- **Push vs poll — resolved (push).** A persistent `Monitor` runs
+  `project-notebook register`, which holds an open SSE pipe; the hub
+  pushes artifact events down it, and registration is connection-bound
+  (no TTL/staleness). This superseded the earlier `UserPromptSubmit`-hook
+  poll.
 - **Privacy when the hub leaves localhost.** Today the hub is local.
   An eventual cloud-offload mode raises real privacy concerns
   (Whisper-as-a-service is sending your audio to someone). Keep
