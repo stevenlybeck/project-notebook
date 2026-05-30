@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project Notebook</title>
+  <meta name="description" content="Share to your coding project from your phone. Watch Claude pick it up live.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23b54a18'/%3E%3Cpath d='M22 18h20v28H22z' fill='%23faf7f2'/%3E%3Cpath d='M22 18h4v28h-4z' fill='%23b54a18' opacity='.35'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --bg:        #faf7f2;       /* warm paper */
+      --bg-soft:   #f3ede2;       /* subtle inset */
+      --ink:       #2a2520;       /* warm dark */
+      --ink-soft:  #6b5d4f;       /* mid-tone */
+      --ink-fade:  #9c8e7c;       /* tertiary */
+      --rule:      #e6dccb;       /* soft line */
+      --accent:    #b54a18;       /* terracotta */
+      --accent-soft: #efd8c8;     /* tinted bg */
+      --code-bg:   #efe9dc;
+      --max:       760px;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+      font-size: 17px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    .wrap { max-width: var(--max); margin: 0 auto; padding: 32px 24px 96px; }
+
+    /* nav */
+    nav.top {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 14px; color: var(--ink-soft);
+      padding-bottom: 64px;
+    }
+    nav.top .brand {
+      font-weight: 600; letter-spacing: 0.02em; color: var(--ink);
+      text-decoration: none;
+    }
+    nav.top .brand .dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+      background: var(--accent); vertical-align: middle; margin-right: 8px;
+      transform: translateY(-1px);
+    }
+    nav.top .links a {
+      color: var(--ink-soft); text-decoration: none; margin-left: 20px;
+    }
+    nav.top .links a:hover { color: var(--accent); }
+
+    /* hero */
+    h1.hero {
+      font-family: "Iowan Old Style", "Source Serif Pro", "Georgia", serif;
+      font-weight: 600;
+      font-size: clamp(40px, 6.5vw, 60px);
+      line-height: 1.05;
+      letter-spacing: -0.01em;
+      margin: 0 0 22px;
+      color: var(--ink);
+    }
+    h1.hero em {
+      font-style: italic;
+      color: var(--accent);
+    }
+    .lede {
+      font-size: 19px;
+      color: var(--ink-soft);
+      max-width: 560px;
+      margin: 0 0 36px;
+    }
+
+    /* section headers */
+    h2 {
+      font-family: "Iowan Old Style", "Source Serif Pro", "Georgia", serif;
+      font-weight: 600;
+      font-size: 28px;
+      letter-spacing: -0.005em;
+      margin: 72px 0 14px;
+      color: var(--ink);
+    }
+    h2 .step {
+      display: inline-block;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      font-size: 13px;
+      color: var(--accent);
+      letter-spacing: 0.08em;
+      margin-right: 14px;
+      vertical-align: 0.22em;
+    }
+    p.sub {
+      color: var(--ink-soft);
+      margin-top: 0;
+    }
+
+    /* code */
+    pre, code {
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    }
+    pre {
+      background: var(--code-bg);
+      color: var(--ink);
+      padding: 18px 20px;
+      border-radius: 10px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.55;
+      margin: 14px 0 0;
+      border: 1px solid var(--rule);
+    }
+    pre .c { color: var(--ink-fade); }   /* comment */
+    pre .p { color: var(--accent); }     /* prompt */
+    pre .k { color: var(--accent); }     /* key signal */
+    p code, li code {
+      background: var(--code-bg);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 0.92em;
+    }
+
+    /* pillars list above diagram */
+    ol.pillars {
+      list-style: none;
+      counter-reset: pillar;
+      padding: 0;
+      margin: 24px 0 8px;
+    }
+    ol.pillars li {
+      counter-increment: pillar;
+      position: relative;
+      padding: 14px 0 14px 44px;
+      color: var(--ink);
+      font-size: 16px;
+      line-height: 1.55;
+      border-top: 1px solid var(--rule);
+    }
+    ol.pillars li:last-child { border-bottom: 1px solid var(--rule); }
+    ol.pillars li::before {
+      content: counter(pillar, decimal-leading-zero);
+      position: absolute;
+      left: 0; top: 16px;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      color: var(--accent);
+      letter-spacing: 0.08em;
+    }
+    ol.pillars strong { color: var(--ink); font-weight: 600; }
+    ol.pillars em { font-style: italic; color: var(--accent); }
+
+    /* diagram */
+    .diagram-wrap {
+      margin: 28px -24px 0;
+      padding: 32px 24px 12px;
+      background: linear-gradient(180deg, var(--bg-soft) 0%, var(--bg) 100%);
+      border-radius: 16px;
+      border: 1px solid var(--rule);
+    }
+    .diagram-wrap svg { display: block; width: 100%; height: auto; }
+    .diagram-caption {
+      text-align: center;
+      font-size: 14px;
+      color: var(--ink-soft);
+      margin: 0 auto;
+      max-width: 520px;
+      padding-bottom: 12px;
+    }
+
+    /* what you'll see */
+    .seen {
+      background: var(--code-bg);
+      border-radius: 10px;
+      padding: 18px 20px;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+      font-size: 13.5px;
+      line-height: 1.6;
+      border: 1px solid var(--rule);
+      white-space: pre;
+      overflow-x: auto;
+      margin-top: 16px;
+    }
+    .seen .a { color: var(--accent); }
+    .seen .m { color: var(--ink-soft); }
+
+    /* footer */
+    footer {
+      margin-top: 88px;
+      padding-top: 28px;
+      border-top: 1px solid var(--rule);
+      display: flex; flex-wrap: wrap; gap: 22px;
+      font-size: 14px;
+      color: var(--ink-soft);
+    }
+    footer a { color: var(--ink-soft); text-decoration: none; }
+    footer a:hover { color: var(--accent); }
+    footer .gap { flex: 1; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="top">
+    <a class="brand" href="./"><span class="dot"></span>Project Notebook</a>
+    <div class="links">
+      <a href="https://github.com/stevenlybeck/project-notebook">GitHub</a>
+      <a href="architecture.md">Architecture</a>
+      <a href="security.md">Security</a>
+    </div>
+  </nav>
+
+  <header>
+    <h1 class="hero">AirDrop,<br>for your <em>coding session</em>.</h1>
+    <p class="lede">
+      Sometimes a project lives partly outside your computer &mdash; at the bench,
+      the whiteboard, the breadboard. Project Notebook is a bridge from your
+      phone into the Claude Code session you&rsquo;re already in: photos, voice
+      memos, videos, screenshots, files. Whatever just happened out there,
+      brought back in.
+    </p>
+    <p class="lede" style="margin-top:-12px">
+      And the session writes down <em>what you were thinking when it arrived</em>,
+      attached to the file. A month later, the photo still means something.
+    </p>
+  </header>
+
+  <h2>Why this exists</h2>
+  <p class="sub">
+    I&rsquo;m learning electronics. My desk is half breadboard, half terminal.
+    I&rsquo;d snap a photo of a circuit that finally worked, mumble a voice memo
+    about why the 2.2&thinsp;k&Omega; pull-ups beat the 4.7&thinsp;k&Omega; ones,
+    then come back a week later staring at a photo of wires with no memory of
+    what I was looking at.
+  </p>
+  <p class="sub">
+    The pieces I needed already existed &mdash; AirDrop moves files, Claude Code
+    sits next to me while I work, my phone&rsquo;s share sheet is right there.
+    What didn&rsquo;t exist was the connection between them: a way to get the
+    artifact and the thinking-around-it into the same place, automatically.
+    Project Notebook is that connection.
+  </p>
+
+  <h2>How it works</h2>
+  <p class="sub">Three moving parts. One library that grows.</p>
+
+  <ol class="pillars">
+    <li><strong>Send anything from your phone</strong> &mdash; from any app&rsquo;s share sheet, into a specific project you&rsquo;re working on.</li>
+    <li><strong>It gets filed in your project&rsquo;s library</strong> &mdash; one tidy folder per project on your Mac, with everything the tools could figure out about each file alongside it.</li>
+    <li><strong>Your session writes down what was happening</strong> &mdash; the conversation you&rsquo;re in becomes the <em>context</em> attached to the file, so when you come back later, you still know what you were looking at.</li>
+  </ol>
+
+  <div class="diagram-wrap" aria-label="Architecture diagram">
+    <svg viewBox="0 0 880 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="diagramTitle diagramDesc">
+      <title id="diagramTitle">Project Notebook artifact pipeline</title>
+      <desc id="diagramDesc">From any app on your phone, you share an artifact into a specific project. The hub on your Mac ingests, extracts, and stores it in a per-project repository. Your live Claude Code session sees the notification, reads the artifact, and writes annotations carrying the session's context back into the same repository.</desc>
+
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,1 L9,5 L0,9 z" fill="#2a2520"/>
+        </marker>
+        <marker id="arrow-accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,1 L9,5 L0,9 z" fill="#b54a18"/>
+        </marker>
+        <marker id="arrow-small" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M0,2 L9,5 L0,8 z" fill="#2a2520"/>
+        </marker>
+      </defs>
+
+      <!-- column eyebrows -->
+      <g font-family="ui-monospace, SFMono-Regular, monospace" font-size="11" fill="#b54a18" letter-spacing="1.4">
+        <text x="130" y="36" text-anchor="middle">1 · YOUR PHONE</text>
+        <text x="440" y="36" text-anchor="middle">2 · HUB ON YOUR MAC</text>
+        <text x="750" y="36" text-anchor="middle">3 · CLAUDE CODE SESSION</text>
+      </g>
+
+      <!-- ============ PHONE CARD ============ -->
+      <g>
+        <rect x="20" y="56" width="220" height="300" rx="14" fill="#fffdf8" stroke="#d9cfc1" stroke-width="1.5"/>
+
+        <!-- "from any app" eyebrow -->
+        <text x="130" y="84" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10" fill="#9c8e7c" letter-spacing="1.2">FROM ANY APP</text>
+
+        <!-- 4 app icon squares - abstract -->
+        <g>
+          <rect x="58"  y="94" width="24" height="24" rx="6" fill="#efd8c8"/>
+          <circle cx="70"  cy="106" r="4" fill="#b54a18"/>
+          <rect x="90"  y="94" width="24" height="24" rx="6" fill="#e6dccb"/>
+          <rect x="96"  y="100" width="12" height="12" rx="2" fill="#6b5d4f"/>
+          <rect x="122" y="94" width="24" height="24" rx="6" fill="#efd8c8"/>
+          <path d="M128 113 L134 102 L140 113 Z" fill="#b54a18" opacity=".7"/>
+          <rect x="154" y="94" width="24" height="24" rx="6" fill="#e6dccb"/>
+          <circle cx="166" cy="106" r="6" fill="none" stroke="#6b5d4f" stroke-width="1.5"/>
+        </g>
+
+        <!-- share gesture arrow -->
+        <path d="M130 132 L130 152" stroke="#2a2520" stroke-width="1.5" stroke-linecap="round" marker-end="url(#arrow-small)"/>
+        <text x="148" y="148" font-family="-apple-system, Inter, system-ui" font-size="11" fill="#6b5d4f" font-style="italic">share</text>
+
+        <!-- "to a specific project" eyebrow -->
+        <text x="130" y="178" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10" fill="#9c8e7c" letter-spacing="1.2">TO A SPECIFIC PROJECT</text>
+
+        <!-- project picker mock -->
+        <rect x="44" y="190" width="172" height="86" rx="8" fill="#f3ede2" stroke="#d9cfc1" stroke-width="1"/>
+        <!-- selected row -->
+        <rect x="50" y="198" width="160" height="26" rx="5" fill="#fffdf8" stroke="#b54a18" stroke-width="1.2"/>
+        <text x="62" y="216" font-family="ui-monospace, monospace" font-size="12" fill="#2a2520">esp32-sensors</text>
+        <circle cx="198" cy="211" r="4" fill="#b54a18"/>
+        <!-- other rows -->
+        <text x="62" y="244" font-family="ui-monospace, monospace" font-size="12" fill="#9c8e7c">i2c-driver</text>
+        <text x="62" y="266" font-family="ui-monospace, monospace" font-size="12" fill="#9c8e7c">solar-monitor</text>
+
+        <!-- footer caption -->
+        <text x="130" y="316" text-anchor="middle" font-family="-apple-system, Inter, system-ui" font-size="12" fill="#6b5d4f" font-style="italic">photo · video · audio · file</text>
+      </g>
+
+      <!-- ============ HUB CARD ============ -->
+      <g>
+        <rect x="280" y="56" width="320" height="300" rx="14" fill="#fffdf8" stroke="#d9cfc1" stroke-width="1.5"/>
+
+        <text x="440" y="92" text-anchor="middle" font-family="Iowan Old Style, Georgia, serif" font-weight="600" font-size="22" fill="#2a2520">Catches it. Makes sense of it.</text>
+        <text x="440" y="116" text-anchor="middle" font-family="-apple-system, Inter, system-ui" font-size="13" fill="#6b5d4f" font-style="italic">a tiny program running on your Mac</text>
+
+        <!-- three plain-English rows -->
+        <g font-family="-apple-system, BlinkMacSystemFont, Inter, system-ui" font-size="14" fill="#2a2520">
+          <rect x="306" y="148" width="268" height="46" rx="8" fill="#f3ede2"/>
+          <circle cx="324" cy="171" r="6" fill="#b54a18"/>
+          <text x="344" y="167">Files it in your project library</text>
+          <text x="344" y="183" font-size="11" fill="#6b5d4f">named, dated, in the right folder</text>
+
+          <rect x="306" y="202" width="268" height="46" rx="8" fill="#f3ede2"/>
+          <circle cx="324" cy="225" r="6" fill="#b54a18" opacity=".75"/>
+          <text x="344" y="221">Listens to audio &amp; reads the video</text>
+          <text x="344" y="237" font-size="11" fill="#6b5d4f">transcripts, preview frames, metadata</text>
+
+          <rect x="306" y="256" width="268" height="46" rx="8" fill="#f3ede2"/>
+          <circle cx="324" cy="279" r="6" fill="#b54a18" opacity=".5"/>
+          <text x="344" y="275">Pings your active session</text>
+          <text x="344" y="291" font-size="11" fill="#6b5d4f">so Claude sees it the moment it lands</text>
+        </g>
+
+        <line x1="324" y1="181" x2="324" y2="269" stroke="#b54a18" stroke-width="1.5" stroke-dasharray="2 4" opacity=".5"/>
+
+        <text x="440" y="336" text-anchor="middle" font-family="-apple-system, Inter, system-ui" font-size="12" fill="#9c8e7c" font-style="italic">runs on your machine · not in the cloud</text>
+      </g>
+
+      <!-- ============ SESSION CARD ============ -->
+      <g>
+        <rect x="640" y="56" width="220" height="300" rx="14" fill="#fffdf8" stroke="#d9cfc1" stroke-width="1.5"/>
+
+        <text x="750" y="92" text-anchor="middle" font-family="Iowan Old Style, Georgia, serif" font-weight="600" font-size="18" fill="#2a2520">Sees it live</text>
+
+        <!-- chat-style preview -->
+        <g>
+          <!-- incoming line -->
+          <rect x="660" y="116" width="180" height="46" rx="8" fill="#f3ede2"/>
+          <text x="672" y="134" font-family="-apple-system, Inter, system-ui" font-size="11" fill="#6b5d4f">📎 new from your phone</text>
+          <text x="672" y="152" font-family="-apple-system, Inter, system-ui" font-size="12" fill="#2a2520" font-weight="600">a photo of the breadboard</text>
+
+          <!-- session reply -->
+          <rect x="660" y="172" width="180" height="76" rx="8" fill="#efd8c8"/>
+          <text x="672" y="190" font-family="-apple-system, Inter, system-ui" font-size="11" fill="#b54a18">Claude</text>
+          <text x="672" y="208" font-family="-apple-system, Inter, system-ui" font-size="11" fill="#2a2520">Got it — looks like the</text>
+          <text x="672" y="222" font-family="-apple-system, Inter, system-ui" font-size="11" fill="#2a2520">2.2k pull-ups we just</text>
+          <text x="672" y="236" font-family="-apple-system, Inter, system-ui" font-size="11" fill="#2a2520">swapped in. Saving that</text>
+          <text x="672" y="250" font-family="-apple-system, Inter, system-ui" font-size="11" fill="#2a2520">note on the photo.</text>
+        </g>
+
+        <!-- session context callout -->
+        <text x="750" y="288" text-anchor="middle" font-family="Iowan Old Style, Georgia, serif" font-style="italic" font-size="15" fill="#2a2520">
+          knows what you&apos;re
+        </text>
+        <text x="750" y="307" text-anchor="middle" font-family="Iowan Old Style, Georgia, serif" font-style="italic" font-size="15" fill="#2a2520">
+          working on right now
+        </text>
+        <text x="750" y="332" text-anchor="middle" font-family="-apple-system, Inter, system-ui" font-size="11" fill="#6b5d4f">and attaches that context to the file</text>
+      </g>
+
+      <!-- ============ FORWARD ARROWS (cards row) ============ -->
+      <g>
+        <!-- phone → hub -->
+        <line x1="245" y1="206" x2="275" y2="206" stroke="#2a2520" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+        <!-- hub → session -->
+        <line x1="605" y1="206" x2="635" y2="206" stroke="#b54a18" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow-accent)"/>
+      </g>
+
+      <!-- ============ DOWNWARD CONVERGENCE ARROWS ============ -->
+      <g>
+        <!-- hub writes artifact -->
+        <path d="M 440 360 Q 440 400 380 432" fill="none" stroke="#2a2520" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+        <text x="408" y="402" font-family="-apple-system, Inter, system-ui" font-size="12" fill="#2a2520">the file lands here</text>
+
+        <!-- session writes annotation (carries session context) -->
+        <path d="M 750 360 Q 750 400 420 432" fill="none" stroke="#b54a18" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow-accent)"/>
+        <text x="620" y="402" text-anchor="middle" font-family="-apple-system, Inter, system-ui" font-size="12" fill="#b54a18" font-style="italic">your session attaches its context</text>
+      </g>
+
+      <!-- ============ REPOSITORY ROW ============ -->
+      <g>
+        <rect x="20" y="436" width="840" height="156" rx="14" fill="#fffdf8" stroke="#d9cfc1" stroke-width="1.5"/>
+
+        <!-- title block left -->
+        <text x="44" y="464" font-family="ui-monospace, monospace" font-size="11" fill="#b54a18" letter-spacing="1.4">YOUR PROJECT LIBRARY</text>
+        <text x="44" y="492" font-family="Iowan Old Style, Georgia, serif" font-weight="600" font-size="22" fill="#2a2520">Grows as you work</text>
+        <text x="44" y="518" font-family="-apple-system, Inter, system-ui" font-size="14" fill="#6b5d4f">One tidy folder per project.</text>
+        <text x="44" y="538" font-family="-apple-system, Inter, system-ui" font-size="14" fill="#6b5d4f">Every file kept with what</text>
+        <text x="44" y="558" font-family="-apple-system, Inter, system-ui" font-size="14" fill="#6b5d4f">you were figuring out at the time.</text>
+
+        <!-- tree on the right -->
+        <g font-family="ui-monospace, SFMono-Regular, monospace" font-size="13" fill="#2a2520">
+          <text x="380" y="464" font-weight="600">esp32-sensors/</text>
+          <!-- the artifact both arrows converge on - highlighted -->
+          <rect x="400" y="472" width="440" height="40" rx="6" fill="#efd8c8" opacity=".5"/>
+          <text x="412" y="490">photo of the breadboard</text>
+          <text x="412" y="506" font-size="11" fill="#6b5d4f">+ </text>
+          <text x="426" y="506" font-size="11" fill="#b54a18" font-style="italic">"the 2.2k pull-ups we just swapped in"</text>
+          <text x="412" y="532">voice memo on the I&#178;C fix</text>
+          <text x="412" y="548" font-size="11" fill="#6b5d4f">+ </text>
+          <text x="426" y="548" font-size="11" fill="#b54a18" font-style="italic">transcript &amp; what we tried before this worked</text>
+          <text x="412" y="574">oscilloscope screenshot</text>
+        </g>
+      </g>
+
+      <!-- ============ BOTTOM RAIL ============ -->
+      <g font-family="-apple-system, Inter, system-ui" font-size="11" fill="#9c8e7c" font-style="italic">
+        <text x="440" y="612" text-anchor="middle">Runs entirely on your own machine.</text>
+      </g>
+    </svg>
+  </div>
+
+  <h2><span class="step">01</span>Install it</h2>
+  <p class="sub">It&rsquo;s a Python tool &mdash; install it like any other CLI. The <code>[whisper]</code> extra adds on-device audio &amp; video transcription on Apple Silicon.</p>
+<pre><span class="p">$</span> uv tool install <span class="k">project-notebook[whisper]</span>
+<span class="p">$</span> project-notebook install-claude-code-skill</pre>
+
+  <h2><span class="step">02</span>Pair your phone</h2>
+  <p class="sub">Run <code>pair</code>, point your phone&rsquo;s camera at the QR code in the iOS app. Once.</p>
+<pre><span class="p">$</span> project-notebook pair
+<span class="c"># scan the QR with the Project Notebook iOS app</span></pre>
+
+  <h2><span class="step">03</span>Open a session</h2>
+  <p class="sub">In any Claude Code session, run the skill. As long as the session is open, whatever you share from your phone lands here.</p>
+<pre><span class="p">/</span>notebook-register</pre>
+
+  <h2>What you&rsquo;ll see when it&rsquo;s working</h2>
+  <p class="sub">Share a video from your phone. A moment later, your session says something like:</p>
+  <div class="seen"><span class="a">New artifact:</span> IMG_8150.MOV
+<span class="a">Processed:</span> IMG_8150.MOV &mdash; meta, preview frame, audio
+<span class="a">Processed:</span> IMG_8150.MOV &mdash; transcript ready
+
+<span class="m"># Claude reads the transcript, looks at the preview, and writes</span>
+<span class="m"># a note about what was going on when you sent it &mdash; tied to</span>
+<span class="m"># the file, on disk, for when you come back.</span></div>
+
+  <h2>Go deeper</h2>
+  <p class="sub">It&rsquo;s a small, readable project. If you want to see the plumbing:</p>
+  <ul>
+    <li><a href="architecture.md">Architecture</a> &mdash; how an artifact actually moves through the system.</li>
+    <li><a href="security.md">Security model</a> &mdash; what&rsquo;s allowed to talk to what, and why.</li>
+    <li><a href="ios.md">iOS app</a> &mdash; the share extension and how it pairs.</li>
+    <li><a href="development.md">Development</a> &mdash; running it from source, adding your own processors.</li>
+  </ul>
+
+  <footer>
+    <span>Project Notebook</span>
+    <span class="gap"></span>
+    <a href="https://github.com/stevenlybeck/project-notebook">Source on GitHub</a>
+  </footer>
+
+</div>
+</body>
+</html>
