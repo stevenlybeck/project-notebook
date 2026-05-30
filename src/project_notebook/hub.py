@@ -197,86 +197,43 @@ def _allocate_artifact_dir(project: str, filename: str) -> tuple[Path, Path, str
 
 
 async def handle_ingest(request):
-    """Accept a file upload and deliver to the specified project.
+    """PUT a file as the request body to /api/ingest?project=X&filename=Y[&upload_id=Z].
 
-    Supports two modes:
-    - PUT with query params ?project=X&filename=Y and raw body (from iOS background upload)
-    - POST with multipart form data (from curl/testing)
+    Used by the iOS Share Extension's background URLSession; works just as
+    well from curl: `curl -T <file> "<hub>/api/ingest?project=X&filename=<name>"`.
     """
-    if request.method == "PUT":
-        project_name = request.query.get("project", "")
-        filename = safe_filename(request.query.get("filename", "unnamed"))
-        upload_id = request.query.get("upload_id", filename)
-        content_length = request.content_length
+    project_name = request.query.get("project", "")
+    filename = safe_filename(request.query.get("filename", "unnamed"))
+    upload_id = request.query.get("upload_id", filename)
+    content_length = request.content_length
 
-        if not project_name:
-            return web.Response(status=400, text="Missing 'project' query param")
+    if not project_name:
+        return web.Response(status=400, text="Missing 'project' query param")
+    if project_name not in projects:
+        return web.Response(status=404, text=f"Project '{project_name}' not registered")
 
-        if project_name not in projects:
-            return web.Response(status=404, text=f"Project '{project_name}' not registered")
+    artifact_dir, dest, filename = _allocate_artifact_dir(project_name, filename)
 
-        artifact_dir, dest, filename = _allocate_artifact_dir(project_name, filename)
+    active_uploads[upload_id] = {
+        "filename": filename,
+        "project": project_name,
+        "received": 0,
+        "total": content_length,
+        "status": "uploading",
+    }
 
-        active_uploads[upload_id] = {
-            "filename": filename,
-            "project": project_name,
-            "received": 0,
-            "total": content_length,
-            "status": "uploading",
-        }
-
-        size = 0
-        with open(dest, "wb") as f:
-            while True:
-                chunk = await request.content.read(1024 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
-                size += len(chunk)
-                active_uploads[upload_id]["received"] = size
-
-        active_uploads[upload_id]["status"] = "completed"
-        print(f"[hub] Ingested {filename} ({size} bytes) → {project_name} ({dest})")
-
-    else:
-        # Multipart POST (for curl/testing)
-        reader = await request.multipart()
-        project_name = None
-        filename = None
-        dest = None
-
+    size = 0
+    with open(dest, "wb") as f:
         while True:
-            part = await reader.next()
-            if part is None:
+            chunk = await request.content.read(1024 * 1024)
+            if not chunk:
                 break
-            if part.name == "project":
-                project_name = (await part.text()).strip()
-            elif part.name == "file":
-                filename = safe_filename(part.filename)
+            f.write(chunk)
+            size += len(chunk)
+            active_uploads[upload_id]["received"] = size
 
-                if not project_name:
-                    return web.Response(status=400, text="Missing 'project' field")
-
-                if project_name not in projects:
-                    return web.Response(status=404, text=f"Project '{project_name}' not registered")
-
-                artifact_dir, dest, filename = _allocate_artifact_dir(project_name, filename)
-
-                size = 0
-                with open(dest, "wb") as f:
-                    while True:
-                        chunk = await part.read_chunk(1024 * 1024)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        size += len(chunk)
-
-                print(f"[hub] Ingested {filename} ({size} bytes) → {project_name} ({dest})")
-
-        if not project_name:
-            return web.Response(status=400, text="Missing 'project' field")
-        if not dest:
-            return web.Response(status=400, text="Missing 'file' field")
+    active_uploads[upload_id]["status"] = "completed"
+    print(f"[hub] Ingested {filename} ({size} bytes) → {project_name} ({dest})")
 
     record_event("artifact_received", project_name, filename=dest.name, path=str(dest))
 
@@ -506,7 +463,6 @@ def make_apps():
         client_max_size=1024 * 1024 * 1024,  # 1GB max upload
         middlewares=[require_device_token],
     )
-    phone.router.add_post("/api/ingest", handle_ingest)
     phone.router.add_put("/api/ingest", handle_ingest)
     phone.router.add_post("/api/pair", handle_pair)
     phone.router.add_get("/api/projects", handle_projects)  # device lists projects to pick one
