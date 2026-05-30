@@ -82,15 +82,15 @@ Pairing sits inside a broader three-plane access model (local commands over a Un
 
 Task checklist (build after A+B; depends on B's persisted state for device tokens):
 
-- [ ] **Split listeners** — one process, three aiohttp sites: `UnixSite` (`hub.sock`, mode `0600`) for local commands; `TCPSite` `0.0.0.0:9999` for the phone API; `TCPSite` `127.0.0.1` for the web UI. Move each route onto the plane where it belongs.
-- [ ] **Fix path traversal in `ingest`** — destination is currently `artifacts_dir / filename` from client input; use `Path(filename).name` to strip directory components. Live bug today, independent of pairing.
-- [ ] **Device registry** — persist device tokens in `~/.project-notebook/` (extends B), with mint/verify/revoke.
-- [ ] **`pair` flow** — `pairing.py` mints a single-use, ~60–120s pairing code + long-lived device token; `notebook pair` renders the QR; `/api/pair` exchanges code → token.
-- [ ] **Bearer-token middleware** — on the phone-API listener only; reject unknown/revoked tokens.
-- [ ] **Host-header check** — on the web-UI listener, reject non-`localhost` Host to block DNS rebinding.
-- [ ] **CLI over the socket** — `register`/`status`/etc. talk to `hub.sock` via `aiohttp.UnixConnector` (or `httpx` `uds=`).
-- [ ] **mDNS/Bonjour** — advertise `_notebook._tcp.local` for LAN discovery.
-- [ ] **iOS** — see section 5.
+- [x] **Split listeners** — one process, three aiohttp sites: `UnixSite` (`hub.sock`, mode `0600`) for local commands; `TCPSite` `0.0.0.0:<phone-port>` for the phone API; `TCPSite` `127.0.0.1` for the web UI. Move each route onto the plane where it belongs.
+- [x] **Fix path traversal in `ingest`** — destination is currently `artifacts_dir / filename` from client input; use `Path(filename).name` to strip directory components. Live bug today, independent of pairing. *(`safe_filename` in `hub.py`.)*
+- [x] **Device registry** — persist device tokens in `~/.project-notebook/` (extends B), with mint/verify/revoke.
+- [x] **`pair` flow** — `pairing.py` mints a single-use, ~60–120s pairing code + long-lived device token; `notebook pair` renders the QR; `/api/pair` exchanges code → token.
+- [x] **Bearer-token middleware** — on the phone-API listener only; reject unknown/revoked tokens.
+- [x] **Host-header check** — on the web-UI listener, reject non-`localhost` Host to block DNS rebinding. *(`require_local_host` in `hub.py`.)*
+- [x] **CLI over the socket** — `register`/`status`/etc. talk to `hub.sock` via `aiohttp.UnixConnector` (or `httpx` `uds=`).
+- [x] **mDNS/Bonjour** — advertise `_notebook._tcp.local` for LAN discovery.
+- [x] **iOS** — see section 5.
 
 ### 5. iOS app changes
 
