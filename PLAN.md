@@ -98,6 +98,136 @@ Task checklist (build after A+B; depends on B's persisted state for device token
 - All requests to the hub gain an `Authorization: Bearer <token>` header
 - Discovery via Bonjour, falling back to a manually entered URL
 
+## Install & Setup — pre-publish polish
+
+The work to do before this is comfortable to put on PyPI. The current install is
+`uv tool install project-notebook[whisper]` and then a folklore `brew install
+ffmpeg`. That's leaky: users have to know what "whisper" is, they have to know
+ffmpeg is needed, and there's no surfaced status when a dep is missing — the
+hub just silently skips processors. Decompose this into a feature-centric
+install + check flow that also opens the door to broader platform support
+(transcription on Intel/Linux, etc.).
+
+### Target experience
+
+```
+$ uv tool install project-notebook        # single command, no extras visible
+$ project-notebook check                  # what's on, what's off, what's missing
+$ project-notebook setup                  # interactive: install what's missing
+```
+
+Output is **feature-centric**, not package-centric — users read "Video preview
+frames" and "Audio transcription", not "ffmpeg" and "mlx-whisper".
+
+Sketch:
+```
+Project Notebook · status
+
+Core
+  ✓ hub                       running (port 53112)
+  ✓ Claude Code skill         installed
+  ✓ phone pairing             1 device paired (iPhone)
+
+Optional features
+  ✓ Video metadata & previews    ffmpeg detected
+  ⚠ Audio transcription          no backend installed
+                                 [1] mlx-whisper · Apple Silicon, recommended
+                                 [2] whisper.cpp · cross-platform binary
+                                 [3] openai-whisper · slow but anywhere
+                                 [s] skip
+```
+
+### Feature decomposition
+
+Each feature is a descriptor in code:
+- `id` (stable) · `name` (human-readable)
+- list of **backends**, each with: required Python imports, required PATH
+  binaries, platform constraint (e.g. `arm64+darwin`), install hint
+- runtime status: `on` · `available` · `off` · `unsupported-on-this-platform`
+
+Initial features:
+- **Photo & file ingest** — core, always on
+- **Video metadata & preview frames** — needs `ffmpeg` on PATH
+- **Audio transcription** — multi-backend (see below)
+- **Phone pairing** — core; status reports devices paired
+- **Claude Code skill** — core; status reports whether `~/.claude/skills/notebook-register` exists
+
+### Transcription backend abstraction
+
+Refactor `processors/whisper.py` so it consults a registry of backends rather
+than `import mlx_whisper` directly. Each backend declares its detection
+(`importable` / `binary on PATH` / platform). The processor picks the user's
+configured backend if installed, otherwise the first available one,
+otherwise reports the feature as off (does not crash).
+
+Backends (initial set):
+- `mlx-whisper` — Apple Silicon only, fast, recommended on M-series Macs
+- `whisper.cpp` — cross-platform binary, the right default for Intel/Linux
+- `openai-whisper` — pure-Python fallback, slow but works anywhere
+
+This is also what unlocks the platform-broadening — today the code is implicitly
+Apple-Silicon-only.
+
+### `check` and `setup` commands
+
+- **`project-notebook check`** — passive; prints feature table; supports
+  `--json` for tooling and exits non-zero if anything's missing. Safe to run in CI.
+- **`project-notebook setup`** — interactive; for each missing-but-installable
+  feature, prompts with the install command. Python deps: shell out to
+  `uv tool install --reinstall --with <pkg> project-notebook` (see open question
+  below on whether that persists across upgrades). System binaries: offer
+  `brew install` on macOS when Homebrew is present; print the equivalent
+  apt/dnf/pacman snippet on Linux. No `sudo` invocations on the user's behalf.
+- Setup must be runnable **before** the hub starts — it should not depend on a
+  running hub.
+
+### Config persistence
+
+`~/.project-notebook/config.toml` (new file, distinct from runtime `state.json`):
+```toml
+[features.audio_transcription]
+backend = "mlx-whisper"   # user's chosen backend
+```
+
+Resolution at runtime: configured backend → first available → none. Config is
+user preference; live detection is what's actually installed; resolution
+combines them.
+
+### Cross-platform notes
+
+- Detect platform up front; never offer mlx on Intel/Linux.
+- macOS: shell out to `brew` when present; print instructions otherwise.
+- Linux: print `apt` / `dnf` / `pacman` snippets; do not invoke them.
+- Windows: lowest priority for v1 — print equivalent instructions, best-effort.
+
+### Landing-page implications
+
+Once this lands, `docs/index.html` step 01 collapses to:
+```
+$ uv tool install project-notebook
+$ project-notebook setup
+```
+The `[whisper]` extra disappears from the install command and from the user's
+mental model.
+
+### Open questions
+
+- **Does `uv tool install --reinstall --with <pkg>` persist across a later
+  `uv tool upgrade`?** If yes, the mechanism above is clean. If no, `setup`
+  needs to either (a) re-apply choices on upgrade, or (b) host backends
+  out-of-tool-env (separate venv at `~/.project-notebook/venv/`, hub shells
+  out). Test before committing to the approach.
+- **Bundled vs separate iOS pairing detection.** `check` should report device
+  count without needing the hub running — read `state.json` directly, same as
+  the hub does. Confirm that's safe (read-only access, no contention).
+- **What's the failure mode when the configured backend is uninstalled?**
+  Auto-fall-back silently, or print a one-line warning each time the hub
+  starts? Leaning toward warn-once-per-startup.
+- **Auto-detect vs explicit-opt-in for backends.** If the user has e.g.
+  `whisper.cpp` already on their PATH from another project, do we use it
+  automatically or wait for them to run `setup`? Leaning auto-use-if-detected
+  on first run, but record the choice in config so it's stable thereafter.
+
 ## Deferred (post-v1)
 
 - **Menu-bar app** — separate `project-notebook-menubar` package, or a native `.app`. Decide when v1 is in use and the pain of "is the hub running?" becomes concrete.
