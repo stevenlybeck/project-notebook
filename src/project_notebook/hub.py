@@ -26,8 +26,50 @@ from . import pairing, processors
 STATE_DIR = Path(os.environ.get("PROJECT_NOTEBOOK_HOME", Path.home() / ".project-notebook"))
 STATE_FILE = STATE_DIR / "state.json"
 HUB_ARTIFACTS_DIR = STATE_DIR / "artifacts"  # central artifact store (per-project subdirs)
-PORT = int(os.environ.get("PROJECT_NOTEBOOK_PORT", "9999"))          # phone API (LAN)
+PORT_FILE = STATE_DIR / "port"
+PORT: int = 0  # phone API (LAN) — resolved at startup; see _resolve_phone_port
 WEB_PORT = int(os.environ.get("PROJECT_NOTEBOOK_WEB_PORT", "9877"))  # web UI (loopback)
+
+
+def _port_is_free(port: int) -> bool:
+    """True if we can bind 0.0.0.0:port right now."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("0.0.0.0", port))
+            return True
+        except OSError:
+            return False
+
+
+def _resolve_phone_port() -> int:
+    """Decide which port the phone API should bind to.
+
+    Precedence:
+    1. `PROJECT_NOTEBOOK_PORT` env var (honoured verbatim — if it's taken the
+       bind will fail and the caller will see it; no surprise port-swapping).
+    2. The port persisted from a previous run, if it's still free — so iOS's
+       stored hubURL keeps working across hub restarts.
+    3. A free ephemeral port chosen by the OS, then persisted.
+
+    Avoids the "default 9999 collides with DaVinci's fuscript" trap by
+    never relying on a hardcoded port at all.
+    """
+    env = os.environ.get("PROJECT_NOTEBOOK_PORT")
+    if env:
+        return int(env)
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    if PORT_FILE.exists():
+        try:
+            persisted = int(PORT_FILE.read_text().strip())
+            if _port_is_free(persisted):
+                return persisted
+        except (ValueError, OSError):
+            pass
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("0.0.0.0", 0))  # OS picks any free port
+        port = s.getsockname()[1]
+    PORT_FILE.write_text(str(port))
+    return port
 
 # State
 devices: dict = {}    # device_id -> {"token": str, "name": str, "paired_at": float}  (persisted)
@@ -501,8 +543,10 @@ async def _advertise_mdns():
 
 
 async def _serve():
-    load_state()
     STATE_DIR.mkdir(parents=True, exist_ok=True)
+    global PORT
+    PORT = _resolve_phone_port()
+    load_state()
     local, phone, web_ui = make_apps()
 
     # Local commands: Unix domain socket, owner-only.
