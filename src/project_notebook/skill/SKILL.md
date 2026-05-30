@@ -20,8 +20,10 @@ TTLs, no staleness.
 
 Start a **persistent Monitor** running the registration pipe:
 
-- **command:** `uvx project-notebook register "$0"` — omit the argument to use
-  the current directory's name.
+- **command:** `project-notebook register "$0"` — omit the argument to use
+  the current directory's name. Assumes `project-notebook` is on PATH (i.e.
+  `uv tool install project-notebook[whisper]`); if you're running ad-hoc from
+  a local wheel, substitute `uvx --from /path/to/wheel project-notebook register "$0"`.
 - **persistent:** `true`
 - **description:** `artifacts shared to <project>`
 
