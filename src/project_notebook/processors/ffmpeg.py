@@ -76,7 +76,7 @@ def process(artifact_path: Path, sidecar_dir: Path) -> ProcessorResult:
     if probe:
         import yaml
         meta = _meta_from_probe(probe, artifact_path.name)
-        (sidecar_dir / "meta.yaml").write_text(yaml.safe_dump(meta, sort_keys=False))
+        (sidecar_dir / "meta.yaml").write_text(yaml.safe_dump(meta, sort_keys=False, allow_unicode=True))
         outputs.append("meta.yaml")
 
     # 2. Audio extraction (mono 16 kHz WAV — Whisper's preferred input)

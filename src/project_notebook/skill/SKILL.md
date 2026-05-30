@@ -55,6 +55,51 @@ Don't wait to be asked — that's the point.
 3. Use everything you have to react in the context of what we're working on —
    for example, a photo of a breadboard during an I²C debugging session,
    a voice memo describing a bug, a screenshot of a stack trace.
+4. Once you've absorbed what just arrived, write annotations back — see the
+   next section.
+
+## Annotation pass
+
+Extraction (ffmpeg, Whisper) writes the mechanical facts into `meta.yaml`:
+codec, duration, dimensions, transcript. *You* — with this conversation's
+context — write what it **means**. That's what makes an artifact discoverable
+later. Without your pass, `meta.yaml` is just dimensions.
+
+Run `project-notebook annotate <sidecar_dir>` and pipe a JSON object on stdin:
+
+```bash
+project-notebook annotate ~/.project-notebook/artifacts/myproj/IMG_8150.MOV.d <<'JSON'
+{
+  "summary": "voice memo walking through the I²C pull-up swap",
+  "relevance": "captures the exact reasoning behind dropping 4.7kΩ to 2.2kΩ — relevant to the BME280 sensor work we've been on this session",
+  "session_context": "We were debugging dropped reads at 400kHz; this memo records the hypothesis and the resistor swap that fixed it.",
+  "key_moments": [
+    {"time": 12.4, "label": "logic analyzer trace settling after the swap"},
+    {"time": 28.0, "label": "soldering iron close-up on the new pull-up"}
+  ],
+  "tags": ["i2c", "bme280", "debugging"]
+}
+JSON
+```
+
+Fields (all optional, include what's useful):
+
+- `summary` — one line: what *is* this artifact?
+- `relevance` — how it relates to what we're working on right now
+- `session_context` — paragraph capturing the moment in our work that this
+  artifact dropped into
+- `key_moments` — list of `{"time": <seconds>, "label": "..."}` for video and
+  audio; omit for images
+- `tags` — short keywords for later search
+
+**When to annotate:**
+
+- **Image** (no `Processed` events expected): annotate right after `New artifact`.
+- **Video / audio**: annotate after the `Processed: … via whisper …` event —
+  that's when you have the transcript to ground the annotations.
+
+Re-running overwrites the `annotations` key, so it's safe to revise later in
+the session if you learn something new.
 
 The session and its pipe close when the Monitor is stopped or the session
 ends; the hub deregisters the project automatically.

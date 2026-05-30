@@ -178,6 +178,42 @@ def cmd_pair(args):
     print(f"Scan within {resp['ttl']}s.")
 
 
+def cmd_annotate(args):
+    """Merge a JSON annotations payload into an artifact's meta.yaml.
+
+    This is the *session's* hook: extraction processors fill in mechanical
+    fields (codec, duration, transcript); the session — with the conversation
+    context — fills in `annotations` (what this artifact *means* in the
+    context of what we're working on). Writing here so we don't ask the model
+    to round-trip YAML correctly.
+    """
+    import yaml
+    from datetime import datetime, timezone
+
+    target = Path(args.path).expanduser()
+    if not target.exists():
+        raise SystemExit(f"No such file or directory: {target}")
+    sidecar_dir = target if target.is_dir() else target.parent
+
+    raw = sys.stdin.read() if args.json in (None, "-") else args.json
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"Invalid JSON: {e}")
+    if not isinstance(payload, dict):
+        raise SystemExit("Annotations payload must be a JSON object")
+
+    meta_path = sidecar_dir / "meta.yaml"
+    meta = yaml.safe_load(meta_path.read_text()) if meta_path.exists() else {}
+    if not isinstance(meta, dict):
+        meta = {}
+
+    payload["annotated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    meta["annotations"] = payload
+    meta_path.write_text(yaml.safe_dump(meta, sort_keys=False, allow_unicode=True))
+    print(f"Wrote annotations to {meta_path}")
+
+
 def cmd_devices(args):
     _ensure_hub_running()
     if args.revoke:
@@ -214,6 +250,11 @@ def main(argv=None):
     p = sub.add_parser("pair", help="Pair a phone by printing a QR code to scan")
     p.add_argument("--address", metavar="HOST", help="Override the hub host in the QR (e.g. your Tailscale IP, when mDNS/LAN is blocked)")
     p.set_defaults(func=cmd_pair)
+
+    p = sub.add_parser("annotate", help="Merge a JSON annotations payload into an artifact's meta.yaml (reads JSON from stdin)")
+    p.add_argument("path", help="Artifact file or its sidecar directory")
+    p.add_argument("--json", default="-", help="Inline JSON payload, or '-' to read from stdin (default)")
+    p.set_defaults(func=cmd_annotate)
 
     p = sub.add_parser("devices", help="List or revoke paired devices")
     p.add_argument("--revoke", metavar="ID", help="Revoke the device with this id")
