@@ -178,6 +178,79 @@ def cmd_pair(args):
     print(f"Scan within {resp['ttl']}s.")
 
 
+def cmd_check(args):
+    """Report which features are available based on installed external tools.
+
+    Passive: never installs anything, never starts the hub. Each feature lists
+    its tools in priority order; the highest-priority installed one is shown
+    as active. When a feature is off, the install hint is printed for every
+    compatible tool so the user can choose. `--json` emits the same view as
+    structured data for tooling.
+    """
+    from . import tools as t
+
+    if args.json:
+        out = {
+            "platform": t.detect_platform(),
+            "features": [
+                {
+                    "id": f.id,
+                    "name": f.name,
+                    "on": f.is_on(),
+                    "active_tool": (f.resolve().id if f.resolve() else None),
+                    "tools": [
+                        {
+                            "id": tool.id,
+                            "supported_here": tool.supported_here(),
+                            "installed": tool.installed(),
+                            "priority": tool.priority,
+                            "install_hint": tool.install_command(),
+                            "notes": tool.notes,
+                        }
+                        for tool in f.tools
+                    ],
+                }
+                for f in t.FEATURES
+            ],
+        }
+        print(json.dumps(out, indent=2))
+        if not all(f.is_on() for f in t.FEATURES):
+            raise SystemExit(1)
+        return
+
+    print(f"Project Notebook · features ({t.detect_platform()})")
+    print()
+    any_off = False
+    for f in t.FEATURES:
+        active = f.resolve()
+        recommended = f.recommended()
+        on = active is not None
+        if not on:
+            any_off = True
+        mark = "✓" if on else "⚠"
+        print(f"{mark} {f.name}")
+        for tool in f.tools:
+            if not tool.supported_here():
+                continue
+            if tool.installed():
+                tag = "  ← active" if (active and tool.id == active.id) else ""
+                print(f"    {tool.id:18s} installed{tag}")
+            else:
+                tag = "  ← recommended" if (recommended and tool.id == recommended.id) else ""
+                print(f"    {tool.id:18s} not installed{tag}")
+                if not on:
+                    cmd = tool.install_command()
+                    if cmd:
+                        print(f"    {'':18s} {cmd}")
+        if not on:
+            print(f"    ⚠ feature off")
+        print()
+    if any_off:
+        print("Some features are off. (Install the recommended tool above; `project-notebook setup` coming soon.)")
+        raise SystemExit(1)
+    print("All features available.")
+
+
 def cmd_annotate(args):
     """Merge a JSON annotations payload into an artifact's meta.yaml.
 
@@ -243,6 +316,10 @@ def main(argv=None):
 
     p = sub.add_parser("status", help="Show the hub and active sessions")
     p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("check", help="Report which features are available based on installed external tools")
+    p.add_argument("--json", action="store_true", help="Emit JSON for tooling")
+    p.set_defaults(func=cmd_check)
 
     p = sub.add_parser("install-claude-code-skill", help="Install the Claude Code skill into ~/.claude/skills")
     p.set_defaults(func=cmd_install_claude_code_skill)
