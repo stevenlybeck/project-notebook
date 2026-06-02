@@ -1,7 +1,7 @@
-"""ffmpeg processor: writes meta.yaml + audio.wav + poster.jpg next to the
-artifact. Audio extraction (mono 16 kHz WAV) is the input the Whisper processor
-consumes — running before it gets the right output. Requires `ffmpeg` and
-`ffprobe` on PATH (`brew install ffmpeg`); reports cleanly if missing."""
+"""extract processor: writes meta.yaml + audio.wav + poster.jpg next to the
+artifact, using the `ffmpeg` tool (and its sibling `ffprobe`). The mono 16 kHz
+audio.wav is the input the `transcribe` processor consumes — registering
+before it ensures the right run order. Reports cleanly if ffmpeg is missing."""
 
 from __future__ import annotations
 
@@ -9,15 +9,17 @@ import json
 import subprocess
 from pathlib import Path
 
+from .. import tools as _tools
 from . import ProcessorResult, register
 
 
-def _have(binary: str) -> bool:
-    try:
-        subprocess.run([binary, "-version"], capture_output=True, timeout=2, check=False)
-        return True
-    except (OSError, subprocess.SubprocessError):
-        return False
+def _ffmpeg_available() -> bool:
+    """Ask the tool registry whether the `extract` feature has a backing tool.
+
+    Single source of truth for "is ffmpeg here?" — same answer `check` reports.
+    """
+    feature = next(f for f in _tools.FEATURES if f.id == "media_extract")
+    return feature.is_on()
 
 
 def _probe(path: Path) -> dict:
@@ -64,10 +66,10 @@ def _meta_from_probe(probe: dict, filename: str) -> dict:
     return meta
 
 
-@register("video", "audio", name="ffmpeg")
+@register("video", "audio", name="extract")
 def process(artifact_path: Path, sidecar_dir: Path) -> ProcessorResult:
-    if not _have("ffmpeg") or not _have("ffprobe"):
-        return {"outputs": [], "error": "ffmpeg/ffprobe not on PATH (try `brew install ffmpeg`)"}
+    if not _ffmpeg_available():
+        return {"outputs": [], "error": "ffmpeg not on PATH (try `brew install ffmpeg`; see `project-notebook check`)"}
 
     outputs: list[str] = []
 
@@ -79,7 +81,7 @@ def process(artifact_path: Path, sidecar_dir: Path) -> ProcessorResult:
         (sidecar_dir / "meta.yaml").write_text(yaml.safe_dump(meta, sort_keys=False, allow_unicode=True))
         outputs.append("meta.yaml")
 
-    # 2. Audio extraction (mono 16 kHz WAV — Whisper's preferred input)
+    # 2. Audio extraction (mono 16 kHz WAV — transcribe processor's preferred input)
     if probe and any(s.get("codec_type") == "audio" for s in probe.get("streams", [])):
         audio_path = sidecar_dir / "audio.wav"
         result = subprocess.run(

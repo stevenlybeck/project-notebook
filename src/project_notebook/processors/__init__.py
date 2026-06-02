@@ -4,14 +4,14 @@ into the artifact's `<filename>.d/` directory.
 Processors register themselves against a MIME family (e.g. "video", "audio") at
 import time via the `register` decorator below. The hub calls `run_for_artifact`
 on each new ingest, which dispatches all matching processors in registration
-order — so a processor that depends on a previous one's output (e.g. Whisper
-needs the WAV that ffmpeg extracts) can rely on the order.
+order — so a processor that depends on a previous one's output (e.g. transcribe
+needs the audio.wav that extract produces) can rely on the order.
 
 Each processor is a sync function `(artifact_path: Path, sidecar_dir: Path) ->
 ProcessorResult`. They run in a worker thread (`asyncio.to_thread`) so the
-hub's event loop is never blocked by ffmpeg/Whisper. A callback fires after
-every processor with the result so it can be pushed down session pipes as an
-`artifact_processed` event.
+hub's event loop is never blocked by ffmpeg/transcription. A callback fires
+after every processor with the result so it can be pushed down session pipes
+as an `artifact_processed` event.
 """
 
 from __future__ import annotations
@@ -64,6 +64,8 @@ async def run_for_artifact(
         on_result(proc_name, result)
 
 
-# Import processor modules so their @register decorators fire.
-from . import ffmpeg  # noqa: E402, F401
-from . import whisper  # noqa: E402, F401
+# Import processor modules so their @register decorators fire. Order matters:
+# transcribe consumes the audio.wav that extract produces, so extract registers
+# first and runs first.
+from . import extract  # noqa: E402, F401
+from . import transcribe  # noqa: E402, F401

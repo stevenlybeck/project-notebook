@@ -11,10 +11,9 @@ dependencies = [
     "zeroconf>=0.131.0",
 ]
 
-[project.optional-dependencies]
-whisper = [
-    "mlx-whisper>=0.4 ; platform_machine == 'arm64' and sys_platform == 'darwin'",
-]
+# Transcription, video extraction etc. are provided by external tools (ffmpeg,
+# mlx-whisper, …) the user installs separately and `project-notebook check`
+# reports on. They are not Python dependencies of this package.
 
 [project.scripts]
 project-notebook = "project_notebook.cli:main"

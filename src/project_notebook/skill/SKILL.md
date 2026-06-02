@@ -22,8 +22,8 @@ Start a **persistent Monitor** running the registration pipe:
 
 - **command:** `project-notebook register "$0"` — omit the argument to use
   the current directory's name. Assumes `project-notebook` is on PATH (i.e.
-  `uv tool install project-notebook[whisper]`); if you're running ad-hoc from
-  a local wheel, substitute `uvx --from /path/to/wheel project-notebook register "$0"`.
+  `uv tool install project-notebook`); if you're running ad-hoc from a local
+  wheel, substitute `uvx --from /path/to/wheel project-notebook register "$0"`.
 - **persistent:** `true`
 - **description:** `artifacts shared to <project>`
 
@@ -95,8 +95,8 @@ Fields (all optional, include what's useful):
 **When to annotate:**
 
 - **Image** (no `Processed` events expected): annotate right after `New artifact`.
-- **Video / audio**: annotate after the `Processed: … via whisper …` event —
-  that's when you have the transcript to ground the annotations.
+- **Video / audio**: annotate after the `Processed: … via transcribe …`
+  event — that's when you have the transcript to ground the annotations.
 
 Re-running overwrites the `annotations` key, so it's safe to revise later in
 the session if you learn something new.

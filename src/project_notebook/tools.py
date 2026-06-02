@@ -131,25 +131,6 @@ MLX_WHISPER = Tool(
     notes="fast on Apple Silicon",
 )
 
-WHISPER_CPP = Tool(
-    id="whisper-cpp",
-    binary="whisper-cli",
-    install_hint={
-        "darwin": "brew install whisper-cpp",
-        "linux": "build from https://github.com/ggml-org/whisper.cpp",
-    },
-    priority=7,
-    notes="cross-platform native binary",
-)
-
-OPENAI_WHISPER = Tool(
-    id="openai-whisper",
-    binary="whisper",
-    install_hint="uv tool install openai-whisper",
-    priority=4,
-    notes="pure Python; slow but runs anywhere",
-)
-
 
 # ============================================================================
 # Feature registry
@@ -166,6 +147,6 @@ FEATURES: tuple[Feature, ...] = (
         id="transcription",
         name="Audio transcription",
         description="Transcribes voice memos and the audio in videos.",
-        tools=(MLX_WHISPER, WHISPER_CPP, OPENAI_WHISPER),
+        tools=(MLX_WHISPER,),
     ),
 )

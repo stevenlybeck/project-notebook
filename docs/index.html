@@ -429,9 +429,11 @@
   </div>
 
   <h2><span class="step">01</span>Install it</h2>
-  <p class="sub">It&rsquo;s a Python tool &mdash; install it like any other CLI. The <code>[whisper]</code> extra adds on-device audio &amp; video transcription on Apple Silicon.</p>
-<pre><span class="p">$</span> uv tool install <span class="k">project-notebook[whisper]</span>
-<span class="p">$</span> project-notebook install-claude-code-skill</pre>
+  <p class="sub">It&rsquo;s a Python tool &mdash; install it like any other CLI. Then run <code>check</code> to see which features are turned on and how to turn on the rest (audio transcription, etc. &mdash; each backed by a small external tool you install separately).</p>
+<pre><span class="p">$</span> uv tool install <span class="k">project-notebook</span>
+<span class="p">$</span> project-notebook install-claude-code-skill
+<span class="p">$</span> project-notebook check
+<span class="c"># follow the install hints for anything off you want on</span></pre>
 
   <h2><span class="step">02</span>Pair your phone</h2>
   <p class="sub">Run <code>pair</code>, point your phone&rsquo;s camera at the QR code in the iOS app. Once.</p>
