@@ -1,343 +1,149 @@
-# Project Notebook — Packaging Plan
+# Project Notebook — Plan
 
-## Goal
+The roadmap and decision log. README is the install/use front door; this is
+"what we're working on and why."
 
-Make project-notebook installable via pip/uv as a developer tool. The intended install is `uv tool install project-notebook` (or `pipx install project-notebook`); the CLI auto-starts the hub, registers projects, and pairs phones. No native GUI in v1 — a menu-bar icon may ship later as a separate package.
+**Current release:** [v0.1.1](https://github.com/stevenlybeck/project-notebook/releases)
+on PyPI. End-to-end loop is alive: phone → hub → session → annotated
+per-project library. Status: personal-tool alpha; iOS app in private
+TestFlight; dogfooding now (see [DOGFOOD.md](DOGFOOD.md)).
 
-## Distribution shape
+## Done
 
-This sits in the same convention as Jupyter, Streamlit, and MLflow: a pip-installable Python tool that runs a local HTTP server. The audience is Claude Code users who already have a Python toolchain, so a menu-bar app would be polish, not a prerequisite.
+### Core delivery
+- **Package + CLI** as a uv-installable tool. `uv tool install project-notebook`.
+- **Three-plane hub** — Unix socket for local commands, TCP for the phone API,
+  TCP loopback for the web UI. Bearer-token middleware on the phone plane;
+  host-header guard on the web plane. See [docs/security.md](docs/security.md).
+- **iOS app + Share Extension** with QR pairing, Keychain-stored device token,
+  Bonjour discovery, multi-URL pairing for overlay networks (Tailscale).
+- **SSE session pipe** — `register` holds an open pipe; the project is
+  registered exactly as long as the session is. Notifications flow live
+  into the Claude Code session via the bundled skill.
+- **Per-project artifact library** at `~/.project-notebook/artifacts/<project>/<file>.d/`,
+  each artifact in its own subdir with sidecars.
 
-## Architecture
+### Processing
+- **`extract` processor** (ffmpeg/ffprobe) — `meta.yaml`, `audio.wav`, `poster.jpg`.
+- **`transcribe` processor** — subprocess to whichever transcription tool the
+  registry resolves to (currently mlx-whisper). `transcript.md` + `transcript.json`.
+- **Annotation pass** — `project-notebook annotate` lets the live session
+  write structured session-context annotations into `meta.yaml`.
 
-```
-uv tool install project-notebook
-                  │
-                  ▼
-         `notebook register`   ← CLI command
-                  │
-                  ├── Is hub running on :9999?
-                  │     No → start it in background (LaunchAgent or detached process)
-                  │     Yes → use existing
-                  │
-                  └── POST /api/register {project, path, ttl}
-                        │
-                        ▼
-                  Project appears in iOS Share Extension
-```
+### Install & Setup
+- **`check`** — passive feature reporter. Reads the tool registry, prints
+  what's on, what's off, and the install hint for what's missing. Exits
+  non-zero when anything's off; supports `--json`.
+- **Tool / Feature registry** — clean separation: processor is the *job*
+  (extract, transcribe); tool is the *external executable* (ffmpeg,
+  mlx-whisper). Adding a tool is a registry entry + a small runner.
+- **`stop` / `restart`** — graceful shutdown via the local-plane
+  `/api/shutdown` endpoint; clean socket cleanup.
+- **Port auto-pick + persistence** — no more port collisions; iOS's stored
+  hubURL stays valid across hub restarts.
+- **`[whisper]` extra dropped** — transcription is an external tool, not
+  a Python extra. `pyproject.toml` ships with no optional dependencies.
 
-## CLI Commands
+### Distribution
+- **MIT licensed**, **PyPI v0.1.1**, **GitHub Releases** tagged.
+- **Landing page** at <https://stevenlybeck.com/project-notebook/>.
+- **README** with install + use + "For alpha testers" walkthrough.
 
-- `notebook register [name] [--ttl 7200]` — ensures hub is running, registers project
-- `notebook hub` — explicitly start the hub (foreground)
-- `notebook status` — show registered projects, paired devices, recent uploads
-- `notebook unregister` — remove project
-- `notebook pair` — print a QR (in the terminal) for the iOS app to scan
-- `notebook devices` — list paired devices, revoke tokens
-- `notebook install-skill` — copy the bundled Claude skill into `~/.claude/skills/`
-- `notebook install-agent` — install the LaunchAgent plist for auto-start on login (opt-in)
+## In flight / next
 
-## What Needs to Change
+Priorities will get reshuffled by what dogfooding surfaces.
 
-### 1. Package structure
-
-Move hub.py into a proper package with CLI entry points:
-
-```
-project-notebook/
-├── pyproject.toml          # package metadata + [project.scripts]
-├── src/
-│   └── project_notebook/
-│       ├── __init__.py
-│       ├── hub.py          # the server (moved here)
-│       ├── cli.py          # CLI entry point
-│       ├── pairing.py      # QR + token mint/verify
-│       └── skill/          # bundled Claude skill (copied on install-skill)
-├── ios/                    # iOS app (not part of the package)
-```
-
-### 2. Hub lifecycle
-
-- `notebook register` checks if :9999 is already responding
-- If not, spawns `notebook hub` as a background process (detached, writes PID to `~/.project-notebook/hub.pid`)
-- `notebook install-agent` is the opt-in path to a launchd plist for auto-start on login — `pip install` does not write LaunchAgents as a side effect
-
-### 3. Claude skill ships with the package
-
-The skill lives inside the package at `src/project_notebook/skill/`. `notebook install-skill` copies it to `~/.claude/skills/notebook-register/` (or `notebook register` does this on first run). Upgrading the package upgrades the skill. The skill itself is a one-liner that calls `notebook register $0`.
-
-### 4. Secure pairing
-
-LAN-only, bearer-token model — no TLS in v1, threat model is "trusted home network" and documented as such.
-
-- `notebook pair` mints a short-lived pairing code + long-lived device token; renders a QR with `{lan_url, pairing_code}` in the terminal (using `qrcode` or `segno`)
-- iOS scans, POSTs the pairing code to `lan_url/api/pair`, receives the device token, stores it in the Keychain
-- Every subsequent iOS request carries the device token as a bearer header; hub rejects unknown tokens
-- mDNS/Bonjour advertises `_notebook._tcp.local` so the LAN URL doesn't need to bake in an IP that changes
-- `notebook devices` lists paired devices and revokes tokens
-
-Pairing sits inside a broader three-plane access model (local commands over a Unix socket, phone API over the LAN, web UI on loopback). See [docs/security.md](docs/security.md) for the full model and rationale.
-
-## Workstream C — Secure pairing + plane separation
-
-Task checklist (build after A+B; depends on B's persisted state for device tokens):
-
-- [x] **Split listeners** — one process, three aiohttp sites: `UnixSite` (`hub.sock`, mode `0600`) for local commands; `TCPSite` `0.0.0.0:<phone-port>` for the phone API; `TCPSite` `127.0.0.1` for the web UI. Move each route onto the plane where it belongs.
-- [x] **Fix path traversal in `ingest`** — destination is currently `artifacts_dir / filename` from client input; use `Path(filename).name` to strip directory components. Live bug today, independent of pairing. *(`safe_filename` in `hub.py`.)*
-- [x] **Device registry** — persist device tokens in `~/.project-notebook/` (extends B), with mint/verify/revoke.
-- [x] **`pair` flow** — `pairing.py` mints a single-use, ~60–120s pairing code + long-lived device token; `notebook pair` renders the QR; `/api/pair` exchanges code → token.
-- [x] **Bearer-token middleware** — on the phone-API listener only; reject unknown/revoked tokens.
-- [x] **Host-header check** — on the web-UI listener, reject non-`localhost` Host to block DNS rebinding. *(`require_local_host` in `hub.py`.)*
-- [x] **CLI over the socket** — `register`/`status`/etc. talk to `hub.sock` via `aiohttp.UnixConnector` (or `httpx` `uds=`).
-- [x] **mDNS/Bonjour** — advertise `_notebook._tcp.local` for LAN discovery.
-- [x] **iOS** — see section 5.
-
-### 5. iOS app changes
-
-- First-launch flow: scan QR → store device token in Keychain
-- All requests to the hub gain an `Authorization: Bearer <token>` header
-- Discovery via Bonjour, falling back to a manually entered URL
-
-## Install & Setup — pre-publish polish
-
-The work to do before this is comfortable to put on PyPI. The current install is
-`uv tool install project-notebook[whisper]` and then a folklore `brew install
-ffmpeg`. That's leaky: users have to know what "whisper" is, they have to know
-ffmpeg is needed, and there's no surfaced status when a dep is missing — the
-hub just silently skips processors. Decompose this into a feature-centric
-install + check flow that also opens the door to broader platform support
-(transcription on Intel/Linux, etc.).
-
-### Target experience
-
-```
-$ uv tool install project-notebook        # single command, no extras visible
-$ project-notebook check                  # what's on, what's off, what's missing
-$ project-notebook setup                  # interactive: install what's missing
-```
-
-Output is **feature-centric**, not package-centric — users read "Video preview
-frames" and "Audio transcription", not "ffmpeg" and "mlx-whisper".
-
-Sketch:
-```
-Project Notebook · status
-
-Core
-  ✓ hub                       running (port 53112)
-  ✓ Claude Code skill         installed
-  ✓ phone pairing             1 device paired (iPhone)
-
-Optional features
-  ✓ Video metadata & previews    ffmpeg detected
-  ⚠ Audio transcription          no backend installed
-                                 [1] mlx-whisper · Apple Silicon, recommended
-                                 [2] whisper.cpp · cross-platform binary
-                                 [3] openai-whisper · slow but anywhere
-                                 [s] skip
-```
-
-### Feature decomposition
-
-Each feature is a descriptor in code:
-- `id` (stable) · `name` (human-readable)
-- list of **backends**, each with: required Python imports, required PATH
-  binaries, platform constraint (e.g. `arm64+darwin`), install hint
-- runtime status: `on` · `available` · `off` · `unsupported-on-this-platform`
-
-Initial features:
-- **Photo & file ingest** — core, always on
-- **Video metadata & preview frames** — needs `ffmpeg` on PATH
-- **Audio transcription** — multi-backend (see below)
-- **Phone pairing** — core; status reports devices paired
-- **Claude Code skill** — core; status reports whether `~/.claude/skills/notebook-register` exists
-
-### Transcription backend abstraction
-
-Refactor `processors/whisper.py` so it consults a registry of backends rather
-than `import mlx_whisper` directly. Each backend declares its detection
-(`importable` / `binary on PATH` / platform). The processor picks the user's
-configured backend if installed, otherwise the first available one,
-otherwise reports the feature as off (does not crash).
-
-Backends (initial set):
-- `mlx-whisper` — Apple Silicon only, fast, recommended on M-series Macs
-- `whisper.cpp` — cross-platform binary, the right default for Intel/Linux
-- `openai-whisper` — pure-Python fallback, slow but works anywhere
-
-This is also what unlocks the platform-broadening — today the code is implicitly
-Apple-Silicon-only.
-
-### `check` and `setup` commands
-
-- **`project-notebook check`** — passive; prints feature table; supports
-  `--json` for tooling and exits non-zero if anything's missing. Safe to run in CI.
-- **`project-notebook setup`** — interactive; for each missing-but-installable
-  feature, prompts with the install command. Python deps: shell out to
-  `uv tool install --reinstall --with <pkg> project-notebook` (see open question
-  below on whether that persists across upgrades). System binaries: offer
-  `brew install` on macOS when Homebrew is present; print the equivalent
-  apt/dnf/pacman snippet on Linux. No `sudo` invocations on the user's behalf.
-- Setup must be runnable **before** the hub starts — it should not depend on a
-  running hub.
-
-### Config persistence
-
-`~/.project-notebook/config.toml` (new file, distinct from runtime `state.json`):
-```toml
-[features.audio_transcription]
-backend = "mlx-whisper"   # user's chosen backend
-```
-
-Resolution at runtime: configured backend → first available → none. Config is
-user preference; live detection is what's actually installed; resolution
-combines them.
-
-### Cross-platform notes
-
-- Detect platform up front; never offer mlx on Intel/Linux.
-- macOS: shell out to `brew` when present; print instructions otherwise.
-- Linux: print `apt` / `dnf` / `pacman` snippets; do not invoke them.
-- Windows: lowest priority for v1 — print equivalent instructions, best-effort.
-
-### Landing-page implications
-
-Once this lands, `docs/index.html` step 01 collapses to:
-```
-$ uv tool install project-notebook
-$ project-notebook setup
-```
-The `[whisper]` extra disappears from the install command and from the user's
-mental model.
-
-### Open questions
-
-- **Does `uv tool install --reinstall --with <pkg>` persist across a later
-  `uv tool upgrade`?** If yes, the mechanism above is clean. If no, `setup`
-  needs to either (a) re-apply choices on upgrade, or (b) host backends
-  out-of-tool-env (separate venv at `~/.project-notebook/venv/`, hub shells
-  out). Test before committing to the approach.
-- **Bundled vs separate iOS pairing detection.** `check` should report device
-  count without needing the hub running — read `state.json` directly, same as
-  the hub does. Confirm that's safe (read-only access, no contention).
-- **What's the failure mode when the configured backend is uninstalled?**
-  Auto-fall-back silently, or print a one-line warning each time the hub
-  starts? Leaning toward warn-once-per-startup.
-- **Auto-detect vs explicit-opt-in for backends.** If the user has e.g.
-  `whisper.cpp` already on their PATH from another project, do we use it
-  automatically or wait for them to run `setup`? Leaning auto-use-if-detected
-  on first run, but record the choice in config so it's stable thereafter.
+- **Dogfood for 1–2 weeks** — see [DOGFOOD.md](DOGFOOD.md). Real use sets
+  the next priorities; without it, the work below is best-guess.
+- **`setup` command** — interactive companion to `check`. Same registry;
+  walks missing tools and runs the recommended install hints. Natural
+  completion of the install-and-setup work.
+- **Config persistence** at `~/.project-notebook/config.toml` — user's
+  chosen transcription tool preference vs. live auto-resolution.
+- **Recruit a tester or two** — once the friction log is clean enough that
+  we're not asking them to live with known annoyances.
 
 ## Deferred (post-v1)
 
-- **Menu-bar app** — separate `project-notebook-menubar` package, or a native `.app`. Decide when v1 is in use and the pain of "is the hub running?" becomes concrete.
-- **HTTPS on LAN** — the current trust model is bearer device token + the network being trusted, where "trusted" means either your LAN *or* a paired-end overlay (Tailscale, WireGuard, …) whose own encryption substitutes for TLS. Two practical pressures could make this worth doing later:
-  - **Plaintext on an untrusted network without an overlay.** Bearer tokens leak in clear. Today's workaround is "use Tailscale" — `pair` encodes every reachable address (LAN + overlay) and the phone tries each.
-  - **App Store review pushes back on `NSAllowsArbitraryLoads`.** That exception is currently required because Tailscale's CGNAT (100.64/10) isn't in iOS's `NSAllowsLocalNetworking` allowlist, and the two keys are mutually exclusive on iOS 10+ (`NSAllowsLocalNetworking`'s mere presence silently disables the parent — see the inline note in `ios/ProjectNotebook/ProjectNotebook/Info.plist`). The standard "companion app to a user-controlled local server" justification usually clears review; if it ever doesn't, HTTPS + cert pinning lets us drop the wide ATS exception and revert to the narrower `NSAllowsLocalNetworking`.
-  - **Shape of the work, when needed.** Hub mints a self-signed cert at first run and serves HTTPS on the phone plane; iOS pins the cert fingerprint via `URLSessionDelegate` cert validation; pairing carries the fingerprint in the QR alongside the URLs; the mDNS TXT record can also publish it. `register` (over the local Unix socket) is unaffected.
-- **QuickShare ingestion** — investigate using QuickShare (Google's cross-platform Nearby Share) as an alternate transport. Could provide a zero-config "send to Mac" path that bypasses LAN/IP/token plumbing entirely, and would extend reach beyond iOS to Android and ChromeOS. Open questions: does the macOS QuickShare client expose a programmable hook, or would the hub need to watch a drop folder?
-- **iOS auto-bump build number** — set `VERSIONING_SYSTEM = "apple-generic"` in pbxproj and add a pre-archive script that sets `CURRENT_PROJECT_VERSION` to either a Unix timestamp (`date +%s`) or `git rev-list --count HEAD`. Apple rejects re-uploads with the same `CFBundleVersion` within a marketing version, so this removes the "remember to bump the build number" tax. Defer until manual bumping in the Xcode UI becomes annoying.
-- **In-depth architecture review** — once the core features (workstreams A–D) are implemented, do a holistic pass over the whole system (hub/agent split, content-addressed storage, the three security planes, API surface, CLI ergonomics) for consistency and simplification before the design ossifies. Best done with working code in hand, not up front.
-- ~~**Port collision handling**~~ — *done.* The hub no longer defaults to a hardcoded port: it picks a free ephemeral port on first run, persists it to `~/.project-notebook/port`, and reuses it on every restart so iOS's stored hubURL stays valid. `PROJECT_NOTEBOOK_PORT` still overrides for the "I want a specific port" case (and is honoured verbatim, no auto-swap on conflict). mDNS continues to advertise the actual bound port, so the iOS app's Bonjour discovery keeps hubURL in sync if it ever does change.
-- **Notify on upload *start*, not completion.** The hub records the artifact event after the file is fully written. The PUT handler already populates `active_uploads` when the upload *begins* — emitting the session-pipe event then would let the agent start assembling context while a large file is still uploading (latency hidden behind the transfer). (The push pipe itself — `register` as an SSE session via a persistent Monitor — is now implemented; see `docs/architecture.md` §4.)
-- **Accurate Swift diagnostics for the editor/LSP** — set up [`xcode-build-server`](https://github.com/SolaWing/xcode-build-server) (`brew install`, then `xcode-build-server config -scheme ProjectNotebook -project ProjectNotebook.xcodeproj` → `buildServer.json`, gitignored) so sourcekit-lsp gets Xcode's real compile flags. Without it, the LSP analyzes Swift files with no iOS SDK/module context and emits false "No such module 'UIKit'" / "Cannot find type X" noise. Purely a local dev-experience improvement — no effect on the Xcode build. Bonus: turns the LSP into a real pre-build error signal.
+- **`setup` for cross-platform tooling** — `brew` on macOS when present;
+  `apt`/`dnf`/`pacman` snippets printed (not invoked) on Linux. No
+  `sudo` on the user's behalf.
+- **More transcription tools** — `whisper.cpp` (cross-platform binary),
+  `openai-whisper` (slow but anywhere). Same model as ffmpeg — declare in
+  registry, add a runner, done. We deliberately shipped mlx-whisper only
+  for v0.1; broaden when there's user demand.
+- **Search across artifacts** — SQLite FTS5 over transcripts + annotations.
+  The thing that makes the annotation work *pay off*. Skills like
+  `/search [query]` build on this. Probably the highest-leverage feature
+  after dogfooding shapes priorities.
+- **Web UI** — three routes wired, mostly empty. Decide whether v1 needs
+  a real UI or "good enough for now" wins. Defer until use shows what's
+  missing.
+- **Menu-bar app** — separate `project-notebook-menubar` package, or a
+  native `.app`. Decide once the pain of "is the hub running?" becomes
+  concrete.
+- **HTTPS on LAN** — current trust model is bearer device token + trusted
+  network (LAN or paired-end overlay like Tailscale). Two pressures could
+  change this:
+  - **Plaintext on an untrusted network without an overlay** — bearer
+    tokens leak. Workaround today: use Tailscale. Pairing encodes every
+    reachable address and the phone tries each.
+  - **App Store review pushes back on `NSAllowsArbitraryLoads`** — the
+    current ATS exception is required because Tailscale's CGNAT isn't in
+    iOS's `NSAllowsLocalNetworking` allowlist, and the two keys are
+    mutually exclusive on iOS 10+ (see the note in
+    `ios/ProjectNotebook/ProjectNotebook/Info.plist`). The "companion app
+    to a user-controlled local server" justification usually clears
+    review; HTTPS + cert pinning is the fallback.
+  - **Shape of the work:** hub mints a self-signed cert on first run;
+    iOS pins the fingerprint via `URLSessionDelegate`; pairing carries the
+    fingerprint in the QR alongside the URLs; mDNS TXT can also publish it.
+- **QuickShare ingestion** — Google's cross-platform Nearby Share as an
+  alternate transport. Would extend reach to Android/ChromeOS and avoid
+  the LAN-discovery/pairing plumbing entirely. Open: does the macOS
+  QuickShare client expose a programmable hook, or do we watch a drop
+  folder?
+- **iOS auto-bump build number** — set `VERSIONING_SYSTEM = "apple-generic"`
+  in pbxproj and add a pre-archive script that derives `CURRENT_PROJECT_VERSION`
+  from a Unix timestamp or `git rev-list --count HEAD`. Defer until manual
+  bumping in Xcode becomes annoying.
+- **Notify on upload *start*, not completion** — the PUT handler already
+  populates `active_uploads` when the upload *begins*; emitting the
+  session-pipe event then would hide transfer latency. (The push pipe
+  itself is now implemented; see `docs/architecture.md` §4.)
+- **Accurate Swift LSP diagnostics** — set up
+  [`xcode-build-server`](https://github.com/SolaWing/xcode-build-server)
+  so sourcekit-lsp sees Xcode's real compile flags. Local dev-experience
+  improvement; no effect on the Xcode build.
+- **Holistic architecture review** — once dogfooding ends and we know
+  what's solid and what isn't, do a pass over hub/agent split, the three
+  security planes, storage layout, CLI ergonomics. Done with working code,
+  not up front.
 
-## Artifact Processing
+## Resolved decisions
 
-When an artifact arrives, the system should extract information and annotate it using the context of the active session.
+- **Package name**: `project-notebook` (with `notebook` as a CLI alias).
+- **Hub persistence**: detached background process; no PID file (health
+  check via socket). LaunchAgent deferred.
+- **Skill distribution**: bundled in the package; `install-claude-code-skill`
+  copies it to `~/.claude/skills/`. Upgrading the package upgrades the skill.
+- **Tool installation model**: external system tools (`brew install`,
+  `uv tool install <sibling>`) rather than Python extras of this package.
+  Side-steps the `uv tool install --reinstall --with` lifecycle question
+  entirely. Clean separation between us and the tools we shell out to.
+- **Port handling**: ephemeral auto-pick on first run, persisted to
+  `~/.project-notebook/port`, reused on every restart. `PROJECT_NOTEBOOK_PORT`
+  overrides verbatim.
+- **Session lifetime**: connection-bound (SSE pipe). No TTLs, no staleness.
+- **Annotation authorship**: the live Claude Code session itself, via
+  `project-notebook annotate`. Not a server-side processor that imports
+  the Claude API.
 
-### Extraction pipeline
-
-Each artifact type has a set of extraction skills:
-
-- **Video**: Whisper transcription (word-level timestamps), keyframe extraction at scene changes
-- **Audio**: Whisper transcription (word-level timestamps)
-- **Image**: No extraction needed (the file is the content)
-
-### Annotation
-
-After extraction, the artifact and its extracted data get annotated using Claude vision/text:
-
-- **What's in this artifact?** — structured description of what's visible/audible
-- **How does it relate to the project?** — using the conversation context from the active session
-- **Key moments** (video/audio) — timestamps of important points linked to transcript
-
-The key insight: the active Claude Code session has the project context. When an artifact arrives, the session knows "we're debugging I2C pull-ups" and can annotate a breadboard photo accordingly, rather than just seeing "a breadboard with wires."
-
-### Processing flow
-
-```
-Artifact arrives at hub
-        │
-        ▼
-Hub notifies the session (via /api/uploads polling or notification)
-        │
-        ▼
-Session runs extraction skills:
-  - whisper for audio/video → transcript + timestamps
-  - ffmpeg for video → keyframes
-        │
-        ▼
-Session annotates using Claude vision + conversation context:
-  - "This photo shows the BME280 sensor with 2.2kΩ pull-ups
-     we just swapped in for the I2C fix"
-        │
-        ▼
-Metadata written as sidecar YAML:
-  artifacts/
-    IMG_4521.mp4
-    IMG_4521.meta.yaml    ← transcript, annotations, context
-    IMG_4521.keyframes/   ← extracted frames
-```
-
-### Sidecar metadata format
-
-```yaml
-id: 2026-04-01-001
-source_file: IMG_4521.mp4
-project: esp32-sensor-array
-ingested: 2026-04-01T14:30:00Z
-type: video
-duration: 273.5
-
-transcript:
-  - time: 0.0
-    text: "Okay so the issue was the pull-up resistors..."
-    end_time: 2.3
-  - time: 2.3
-    text: "I swapped the 4.7k for 2.2k and now it's stable"
-    end_time: 5.1
-
-annotations:
-  - time: 3.2
-    label: "BME280 breakout board with new 2.2kΩ pull-ups"
-    context: "Part of I2C debugging session — replaced pull-ups to fix 400kHz communication"
-  - time: 8.0
-    label: "Logic analyzer showing clean I2C waveform"
-
-session_context: >
-  Debugging I2C communication between ESP32 and BME280 sensor.
-  Previous 4.7kΩ pull-ups caused signal integrity issues at 400kHz.
-  Swapped to 2.2kΩ, which resolved the problem.
-
-tags: [debugging, i2c, hardware, bme280]
-```
-
-### Skills to build
-
-- `/ingest [file]` — run the full extraction + annotation pipeline on an artifact
-- `/transcribe [file]` — just run Whisper transcription
-- `/annotate [file]` — just run vision annotation with session context
-- `/search [query]` — search across all artifact transcripts and annotations (SQLite FTS5)
-
-### Dependencies
-
-- `mlx-whisper` or `whisper.cpp` — local transcription on Apple Silicon
-- `ffmpeg` — keyframe extraction, audio extraction from video
-- Claude API — vision annotation (or use the active session itself)
-
-## Open Questions
-
-- **Package name**: `project-notebook`? `notebook`? Something else?
-- **Hub persistence**: background process with PID file vs launchd plist for auto-start on login?
-- **Skill distribution**: bundled in the package (installed to `~/.claude/skills/`) or stay project-local?
+## Documentation
+- **README.md** — install, use, alpha-tester walkthrough
+- **docs/architecture.md** — hub ↔ agent pipeline
+- **docs/security.md** — three-plane access model
+- **docs/ios.md** — iOS app + share extension
+- **docs/development.md** — running from source
+- **docs/index.html** — landing page with diagrams
+- **DOGFOOD.md** — the current dogfooding sprint
