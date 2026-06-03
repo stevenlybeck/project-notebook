@@ -1,9 +1,35 @@
 [project]
 name = "project-notebook"
 version = "0.1.0"
-description = "Local hub + CLI for ingesting artifacts from your phone into the active project."
+description = "Like AirDrop, but it lands in your Claude Code session. Share photos, voice memos, and videos from your phone straight into your active coding project."
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Steven Lybeck", email = "slybeck@gmail.com" },
+]
+keywords = [
+    "claude-code",
+    "ios",
+    "share-extension",
+    "artifacts",
+    "voice-memo",
+    "transcription",
+    "airdrop",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia",
+    "Topic :: Software Development",
+    "Topic :: Utilities",
+]
 dependencies = [
     "aiohttp>=3.13.5",
     "pyyaml>=6.0",
@@ -14,6 +40,11 @@ dependencies = [
 # Transcription, video extraction etc. are provided by external tools (ffmpeg,
 # mlx-whisper, …) the user installs separately and `project-notebook check`
 # reports on. They are not Python dependencies of this package.
+
+[project.urls]
+Homepage = "https://stevenlybeck.com/project-notebook/"
+Source = "https://github.com/stevenlybeck/project-notebook"
+Issues = "https://github.com/stevenlybeck/project-notebook/issues"
 
 [project.scripts]
 project-notebook = "project_notebook.cli:main"
