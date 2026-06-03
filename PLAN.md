@@ -107,6 +107,13 @@ Priorities will get reshuffled by what dogfooding surfaces.
   in pbxproj and add a pre-archive script that derives `CURRENT_PROJECT_VERSION`
   from a Unix timestamp or `git rev-list --count HEAD`. Defer until manual
   bumping in Xcode becomes annoying.
+- **Xcode Cloud: archive + upload to TestFlight on a branch push** — set up
+  an Xcode Cloud workflow so pushing to a designated branch (`build` or
+  similar) builds, archives, signs, and uploads to TestFlight without me
+  touching Xcode. Removes the manual archive-and-upload tax for every
+  release. Pairs naturally with the auto-bump entry above (they want to
+  ship together). Free quota likely covers our volume; paid tier if it
+  outgrows that.
 - **Notify on upload *start*, not completion** — the PUT handler already
   populates `active_uploads` when the upload *begins*; emitting the
   session-pipe event then would hide transfer latency. (The push pipe
