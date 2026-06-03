@@ -27,8 +27,9 @@ STATE_DIR = Path(os.environ.get("PROJECT_NOTEBOOK_HOME", Path.home() / ".project
 STATE_FILE = STATE_DIR / "state.json"
 HUB_ARTIFACTS_DIR = STATE_DIR / "artifacts"  # central artifact store (per-project subdirs)
 PORT_FILE = STATE_DIR / "port"
-PORT: int = 0  # phone API (LAN) — resolved at startup; see _resolve_phone_port
-WEB_PORT = int(os.environ.get("PROJECT_NOTEBOOK_WEB_PORT", "9877"))  # web UI (loopback)
+WEB_PORT_FILE = STATE_DIR / "web_port"
+PORT: int = 0      # phone API (LAN)    — resolved at startup; see _resolve_phone_port
+WEB_PORT: int = 0  # web UI (loopback) — resolved at startup; see _resolve_web_port
 
 # Set in _serve so the local plane's /api/shutdown handler can request a clean
 # stop. Not exposed on the phone or web planes by construction — the route is
@@ -36,11 +37,11 @@ WEB_PORT = int(os.environ.get("PROJECT_NOTEBOOK_WEB_PORT", "9877"))  # web UI (l
 _shutdown_event: asyncio.Event | None = None
 
 
-def _port_is_free(port: int) -> bool:
-    """True if we can bind 0.0.0.0:port right now."""
+def _port_is_free(port: int, host: str = "0.0.0.0") -> bool:
+    """True if we can bind host:port right now."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
-            s.bind(("0.0.0.0", port))
+            s.bind((host, port))
             return True
         except OSError:
             return False
@@ -74,6 +75,32 @@ def _resolve_phone_port() -> int:
         s.bind(("0.0.0.0", 0))  # OS picks any free port
         port = s.getsockname()[1]
     PORT_FILE.write_text(str(port))
+    return port
+
+
+def _resolve_web_port() -> int:
+    """Decide which port the loopback web UI should bind to.
+
+    Same shape as `_resolve_phone_port` (env override > persisted > auto-pick),
+    just for 127.0.0.1. The old hardcoded default of 9877 made any second
+    hub on this machine — including a leftover process from a previous run —
+    crash at startup with `EADDRINUSE`.
+    """
+    env = os.environ.get("PROJECT_NOTEBOOK_WEB_PORT")
+    if env:
+        return int(env)
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    if WEB_PORT_FILE.exists():
+        try:
+            persisted = int(WEB_PORT_FILE.read_text().strip())
+            if _port_is_free(persisted, host="127.0.0.1"):
+                return persisted
+        except (ValueError, OSError):
+            pass
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    WEB_PORT_FILE.write_text(str(port))
     return port
 
 # State
@@ -567,8 +594,9 @@ async def _advertise_mdns():
 
 async def _serve():
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    global PORT, _shutdown_event
+    global PORT, WEB_PORT, _shutdown_event
     PORT = _resolve_phone_port()
+    WEB_PORT = _resolve_web_port()
     _shutdown_event = asyncio.Event()
     load_state()
     local, phone, web_ui = make_apps()
