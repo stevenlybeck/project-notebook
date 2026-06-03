@@ -45,3 +45,44 @@ Web port now follows the same env-override → persisted → auto-pick
 precedence as the phone port. Two hubs in parallel can coexist;
 restarts reuse the persisted port.
 
+### 2026-06-03 ~17:00 — Bundled skill is too eager to act on artifacts
+
+Self-surfaced by the very first real artifact through the live pipe
+(the "Mokelumne Ave" voice memo on a walk):
+
+> the skill is creatively interpreted by the particular project that
+> is using this … they get really too creative basically. They're
+> like, "oh let me dig in and really solve the problems here or solve
+> the problem that's not even a problem and get deep into the weeds
+> of things."
+
+**Risk surface:** a non-developer end user (Steven's brother is the
+named first external tester) shares a photo and watches the registered
+session decide *now* is a great moment to debug the hub itself —
+writing code, running tests, editing files in a project repo they
+don't recognize. Credibility-burner; the share is supposed to feel
+like AirDrop, not like surrendering control of the IDE.
+
+**Balance to strike:** the skill should still **offer guidance** —
+name what it sees, suggest next steps, ask clarifying questions, do
+the annotation pass. What it should *not* do by default is jump
+autonomously into "let me fix this for you" code paths. The
+conservative posture is **observe → annotate → offer**, not
+**observe → diagnose → act**.
+
+**Shape of the fix:**
+
+- Tighten the bundled SKILL.md so reaction-to-artifacts defaults to
+  the conservative posture, and the more agentic behavior is opt-in
+  ("yes, debug it" from the user).
+- Possibly distinguish two registration modes — project-being-built
+  vs. project-being-worked-in — but the simpler version is to make
+  the conservative posture the default and let the user explicitly
+  ask for more.
+- Carry this through to how the skill describes itself, so the
+  expectation a session sets on first encounter is the right one.
+
+**Triage:** **fix-soon** — real refinement target. Doesn't block this
+dogfood sprint but worth resolving before recruiting the first
+external tester (brother).
+
