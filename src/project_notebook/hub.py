@@ -30,6 +30,11 @@ PORT_FILE = STATE_DIR / "port"
 PORT: int = 0  # phone API (LAN) — resolved at startup; see _resolve_phone_port
 WEB_PORT = int(os.environ.get("PROJECT_NOTEBOOK_WEB_PORT", "9877"))  # web UI (loopback)
 
+# Set in _serve so the local plane's /api/shutdown handler can request a clean
+# stop. Not exposed on the phone or web planes by construction — the route is
+# only registered on `local.router`.
+_shutdown_event: asyncio.Event | None = None
+
 
 def _port_is_free(port: int) -> bool:
     """True if we can bind 0.0.0.0:port right now."""
@@ -403,6 +408,23 @@ async def handle_health(request):
     return web.json_response({"service": "project-notebook-hub", "status": "ok"})
 
 
+async def handle_shutdown(request):
+    """Local-plane only: gracefully stop the hub.
+
+    Returns the response, then asks the main coroutine to wake from its
+    shutdown-event wait via a tiny deferred task. The brief delay lets the
+    response flush to the caller (over the Unix socket) before cleanup tears
+    the listener down — otherwise the client tends to see a connection reset
+    even though the shutdown itself worked.
+    """
+    async def _trigger():
+        await asyncio.sleep(0.05)
+        if _shutdown_event is not None:
+            _shutdown_event.set()
+    asyncio.create_task(_trigger())
+    return web.json_response({"status": "shutting down"})
+
+
 async def handle_pair_new(request):
     """Local plane: mint a single-use pairing code + a pending device token.
 
@@ -494,6 +516,7 @@ def make_apps():
     """
     local = web.Application()
     local.router.add_get("/api/health", handle_health)
+    local.router.add_post("/api/shutdown", handle_shutdown)
     local.router.add_get("/api/session", handle_session)
     local.router.add_get("/api/projects", handle_projects)
     local.router.add_get("/api/uploads", handle_uploads)
@@ -544,8 +567,9 @@ async def _advertise_mdns():
 
 async def _serve():
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    global PORT
+    global PORT, _shutdown_event
     PORT = _resolve_phone_port()
+    _shutdown_event = asyncio.Event()
     load_state()
     local, phone, web_ui = make_apps()
 
@@ -574,11 +598,24 @@ async def _serve():
 
     aiozc = await _advertise_mdns()
     try:
-        await asyncio.Event().wait()
+        await _shutdown_event.wait()
+        print("[hub] shutdown requested, cleaning up …")
     finally:
         if aiozc is not None:
             await aiozc.async_unregister_all_services()
             await aiozc.async_close()
+        for runner in (web_runner, phone_runner, local_runner):
+            try:
+                await runner.cleanup()
+            except Exception:
+                pass
+        # aiohttp's UnixSite releases the bind on cleanup but doesn't remove the
+        # socket inode — unlink it ourselves so `project-notebook stop` sees a
+        # clean state and the next start doesn't trip its "stale socket" path.
+        try:
+            sock_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def run():

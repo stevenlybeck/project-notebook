@@ -1,6 +1,6 @@
 [project]
 name = "project-notebook"
-version = "0.1.0"
+version = "0.1.1"
 description = "Like AirDrop, but it lands in your Claude Code session. Share photos, voice memos, and videos from your phone straight into your active coding project."
 readme = "README.md"
 requires-python = ">=3.12"

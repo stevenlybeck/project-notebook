@@ -178,6 +178,38 @@ def cmd_pair(args):
     print(f"Scan within {resp['ttl']}s.")
 
 
+def cmd_stop(args):
+    """Ask the running hub to shut down gracefully via the local plane.
+
+    No-op (and exits 0) if the hub isn't running. The shutdown endpoint lives
+    on the Unix socket only, so it can't be reached from the LAN or loopback
+    planes — same plane-separation as `pair` and `devices`.
+    """
+    if not _hub_alive():
+        print("Hub is not running.")
+        return
+    try:
+        _post("/api/shutdown", {}, timeout=2.0)
+    except (aiohttp.ClientError, OSError):
+        # The hub may close the connection before we read the response, which
+        # is fine — the request landed and the shutdown was triggered.
+        pass
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        if not _hub_alive():
+            print("Hub stopped.")
+            return
+        time.sleep(0.1)
+    raise SystemExit("Hub stop requested but health check still responding after 5s; try `pkill -f project_notebook.hub`")
+
+
+def cmd_restart(args):
+    """Stop the hub (if running) and start a fresh one."""
+    cmd_stop(args)
+    _ensure_hub_running()
+    print("Hub restarted.")
+
+
 def cmd_check(args):
     """Report which features are available based on installed external tools.
 
@@ -316,6 +348,12 @@ def main(argv=None):
 
     p = sub.add_parser("status", help="Show the hub and active sessions")
     p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("stop", help="Gracefully stop the running hub")
+    p.set_defaults(func=cmd_stop)
+
+    p = sub.add_parser("restart", help="Stop and start the hub")
+    p.set_defaults(func=cmd_restart)
 
     p = sub.add_parser("check", help="Report which features are available based on installed external tools")
     p.add_argument("--json", action="store_true", help="Emit JSON for tooling")
