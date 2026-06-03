@@ -80,6 +80,12 @@ a notification in the conversation within seconds.
 - [docs/ios.md](docs/ios.md) — iOS app + share extension
 - [docs/development.md](docs/development.md) — running from source
 
+## Trying it out as an alpha tester
+
+If Steven sent you here to test the thing, the walkthrough is at
+[docs/tester.md](docs/tester.md) — Mac setup, iPhone setup, and a tiny
+"did it work" check, in that order.
+
 ## Status
 
 Personal tool, alpha. The end-to-end loop works on Apple Silicon Macs
