@@ -86,3 +86,61 @@ conservative posture is **observe → annotate → offer**, not
 dogfood sprint but worth resolving before recruiting the first
 external tester (brother).
 
+### 2026-06-03 evening — Permission prompts during artifact processing
+
+From the electronics project dogfood: as artifacts arrive, the session
+gets repeatedly prompted to approve reads from
+`~/.project-notebook/artifacts/<project>/<file>.d/`, runs of
+conversion tools, etc. — at exactly the moment the user wants the
+experience to feel transparent and AirDrop-like. Each prompt is a
+small jolt out of flow.
+
+No clear resolution yet. Claude Code's per-directory permission model
+is the right design for safety in general, but the artifact directory
+is structurally *outside* the user's project tree, so the session has
+no pre-existing trust relationship with it.
+
+Directions worth thinking about (not committing to one yet):
+
+- `install-claude-code-skill` writes a permission rule for
+  `~/.project-notebook/` into `~/.claude/settings.json` on install,
+  so the trust is granted once at install time.
+- The skill installer prompts for the artifact-dir permission and
+  shows the user what it's doing.
+- The skill SKILL.md instructs the session to ask the user *once* per
+  session for blanket access to the artifact dir, then proceed.
+- Just document the "approve with 'always allow' for this path" UX
+  so users flip the bit themselves and stop being prompted.
+
+**Triage:** **open**. Needs more dogfooding data on how often this
+fires, which specific tools trigger it, and how disruptive it feels
+before picking a direction.
+
+### 2026-06-03 evening — `register` named the project after a subdirectory
+
+The session running on the electronics project was in a subdirectory
+when it ran `project-notebook register` (no explicit name). The CLI
+defaults the project name to `Path.cwd().name`, so the hub got the
+*subdirectory's* name as the project — not the project root the user
+intuitively means.
+
+Real correctness bug. The "project" the user thinks they're
+registering is the repo / working tree root, not wherever they happen
+to be sitting in the tree when they invoke the skill.
+
+**Shape of the fix:** walk up from `cwd` looking for a project-root
+marker — `.git` is the universal one, `pyproject.toml` /
+`package.json` / `.hg` are fallbacks — and use the directory that
+contains it as the project. Fall back to `cwd` only if no marker is
+found. Also print the resolved name **and path** prominently when
+registration succeeds so a mis-registered case is immediately
+visible.
+
+In the meantime: `cd` to the project root before running `register`,
+or pass the project name explicitly (`/notebook-register anova-oven`
+on the skill side, or `project-notebook register anova-oven` on the
+CLI side).
+
+**Triage:** **fix-soon**. Clean fix, real bug, affects correctness of
+every multi-directory project — which is most of them.
+
