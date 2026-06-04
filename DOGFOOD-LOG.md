@@ -144,3 +144,32 @@ CLI side).
 **Triage:** **fix-soon**. Clean fix, real bug, affects correctness of
 every multi-directory project — which is most of them.
 
+### 2026-06-03 evening — Session wrote `notes.md` instead of using `project-notebook annotate`
+
+Asked to annotate the photos and videos coming in, the session in the
+electronics project rolled its own and wrote a `notes.md` file
+directly into the artifact directory. Steven had to interrupt it,
+delete the file, and explicitly direct it at `project-notebook
+annotate`.
+
+Specific instance of the earlier "skills get too creative" pattern,
+but sharper: the right tool already exists (`annotate`), is documented
+in SKILL.md, and is the contract the rest of the system reads from —
+ad-hoc `notes.md` files in the artifact dir don't surface anywhere.
+
+**Shape of the fix:**
+
+- Restructure SKILL.md so `project-notebook annotate` is presented as
+  **the** way to annotate, not "an option." The JSON payload schema is
+  the contract; sessions write through that, not around it.
+- Add an explicit guardrail in SKILL.md: *do not write your own files
+  into the artifact directory*. The sidecar dir is hub-managed; the
+  contract is `annotations` on `meta.yaml`.
+- Cross-reference: this is the same parent as the [17:00 entry on
+  skill over-eagerness](#2026-06-03-1700-bundled-skill-is-too-eager-to-act-on-artifacts).
+
+**Triage:** **fix-soon**. Same parent as the 17:00 entry. Could ship
+as a SKILL.md-only update — installs through `project-notebook
+install-claude-code-skill`, doesn't strictly need a version bump,
+but cleanest bundled with the next release.
+
